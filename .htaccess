@@ -1,0 +1,6 @@
+# Defensa en profundidad: si el DocumentRoot del hosting NO quedo apuntando a /public
+# (por ejemplo, mientras se configura en cPanel), este archivo bloquea el acceso
+# directo a todo lo que no sea la carpeta public/.
+RewriteEngine On
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteRule ^(.*)$ - [F,L]

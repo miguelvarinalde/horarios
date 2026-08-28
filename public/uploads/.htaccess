@@ -1,0 +1,13 @@
+# Defensa en profundidad: aunque el controlador ya valida que solo se
+# guarden imagenes reales (PNG/JPG/GIF/WEBP) con un nombre generado por el
+# servidor, esta carpeta nunca debe poder ejecutar scripts.
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+<FilesMatch "\.(php|phtml|php\d?|phar)$">
+    Require all denied
+</FilesMatch>

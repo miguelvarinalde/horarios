@@ -1,0 +1,12 @@
+/vendor/
+/.env
+/node_modules/
+*.log
+.DS_Store
+Thumbs.db
+/storage/cache/*
+!/storage/cache/.gitkeep
+/storage/instalado.lock
+.phpunit.result.cache
+/public/uploads/logo/*
+!/public/uploads/logo/.gitkeep

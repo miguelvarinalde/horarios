@@ -1,0 +1,12 @@
+RewriteEngine On
+
+# Si el archivo o carpeta solicitado existe fisicamente (assets), servirlo directo
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# En caso contrario, enrutar todo a index.php
+RewriteRule ^ index.php [L]
+
+# Evitar listado de directorios
+Options -Indexes

@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS migrations (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    migration VARCHAR(255) NOT NULL,
+    ejecutada_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_migrations_migration (migration)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
