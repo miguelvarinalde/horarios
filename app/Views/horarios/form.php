@@ -1,4 +1,11 @@
-<?php use App\Core\Session; use App\Core\View; ?>
+<?php
+use App\Core\Session;
+use App\Core\View;
+
+// Los valores de BD vienen "HH:MM:SS"; el patron del input de texto (24h)
+// solo acepta "HH:MM" (5 caracteres).
+$hora5 = fn (?string $valor) => View::e($valor ? substr($valor, 0, 5) : '');
+?>
 <div class="card">
     <h2><?= $vigencia ? 'Editar vigencia de horario' : 'Nueva vigencia de horario' ?> - <?= View::e($empleado['nombre']) ?></h2>
     <p class="text-muted">Marca los dias en que el empleado trabaja. Puedes definir hasta dos bloques por dia para turnos partidos (ej. 08:00-12:00 y 14:00-18:00).</p>
@@ -44,14 +51,14 @@
                     <td><input type="checkbox" name="dia_<?= $num ?>_activo" value="1" <?= $diaVigencia ? 'checked' : '' ?>></td>
                     <td><?= $nombre ?></td>
                     <td>
-                        <input type="time" name="dia_<?= $num ?>_bloque1_inicio" style="width:auto" value="<?= View::e($bloque1['hora_inicio'] ?? '') ?>">
+                        <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="dia_<?= $num ?>_bloque1_inicio" style="width:5.5em" value="<?= $hora5($bloque1['hora_inicio'] ?? null) ?>">
                         -
-                        <input type="time" name="dia_<?= $num ?>_bloque1_fin" style="width:auto" value="<?= View::e($bloque1['hora_fin'] ?? '') ?>">
+                        <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="dia_<?= $num ?>_bloque1_fin" style="width:5.5em" value="<?= $hora5($bloque1['hora_fin'] ?? null) ?>">
                     </td>
                     <td>
-                        <input type="time" name="dia_<?= $num ?>_bloque2_inicio" style="width:auto" value="<?= View::e($bloque2['hora_inicio'] ?? '') ?>">
+                        <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="dia_<?= $num ?>_bloque2_inicio" style="width:5.5em" value="<?= $hora5($bloque2['hora_inicio'] ?? null) ?>">
                         -
-                        <input type="time" name="dia_<?= $num ?>_bloque2_fin" style="width:auto" value="<?= View::e($bloque2['hora_fin'] ?? '') ?>">
+                        <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="dia_<?= $num ?>_bloque2_fin" style="width:5.5em" value="<?= $hora5($bloque2['hora_fin'] ?? null) ?>">
                     </td>
                 </tr>
             <?php endforeach; ?>

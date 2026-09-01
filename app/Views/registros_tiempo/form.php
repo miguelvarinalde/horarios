@@ -40,7 +40,7 @@
             </div>
             <div class="form-group">
                 <label>Hora</label>
-                <input type="time" name="hora" required value="<?= $registro ? View::e(substr($registro['fecha_hora'], 11, 5)) : '' ?>">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora" required value="<?= $registro ? View::e(substr($registro['fecha_hora'], 11, 5)) : '' ?>">
             </div>
         </div>
 

@@ -28,14 +28,19 @@ class ReporteController
     {
         $periodos = PeriodoCalculoModel::all();
 
-        // Sin periodo_id explicito en la URL: se muestra por defecto el mes
-        // calendario actual (buscando o creando ese periodo), en vez de
-        // obligar a crear uno manualmente cada vez. Si el usuario SI eligio
-        // un periodo puntual (del listado, incluyendo uno quincenal/custom
-        // creado a mano), se respeta tal cual.
+        // Sin periodo_id explicito en la URL: se resuelve (buscando o
+        // creando) el periodo del rango pedido en "rango" (mes/semana/dia),
+        // por defecto el mes calendario actual, en vez de obligar a crear
+        // uno manualmente cada vez. Si el usuario SI eligio un periodo
+        // puntual (del listado, incluyendo uno quincenal/custom creado a
+        // mano), se respeta tal cual.
         $periodoId = (int) $request->query('periodo_id');
         if (!$periodoId) {
-            $periodoId = $this->resolverPeriodoDelMesActual();
+            $periodoId = match ($request->query('rango')) {
+                'semana' => $this->resolverPeriodoDeLaSemanaActual(),
+                'dia' => $this->resolverPeriodoDelDiaActual(),
+                default => $this->resolverPeriodoDelMesActual(),
+            };
             $periodos = PeriodoCalculoModel::all(); // puede haberse creado uno nuevo
         }
 
@@ -43,12 +48,19 @@ class ReporteController
 
         [$filas, $columnas, $periodo] = $periodoId ? $this->construirResumen($periodoId, $empleadoIdsPermitidos) : [[], [], null];
 
+        // El listado de "eliminar periodos" solo tiene sentido para quien
+        // realmente puede borrar (ver eliminarPeriodo() para el porque de
+        // exigir tambien equipos.ver_todas), asi que solo se arma si aplica.
+        $puedeEliminarPeriodos = Auth::puede('calculo.ejecutar') && Auth::veTodasLasAreas();
+
         return View::render('reportes/horas_extra', [
             'periodos' => $periodos,
             'periodoId' => $periodoId,
             'periodo' => $periodo,
             'filas' => $filas,
             'columnas' => $columnas,
+            'puedeEliminarPeriodos' => $puedeEliminarPeriodos,
+            'periodosConConteo' => $puedeEliminarPeriodos ? PeriodoCalculoModel::todosConConteoCalculos() : [],
         ]);
     }
 
@@ -80,17 +92,51 @@ class ReporteController
 
     /**
      * Busca (o crea) el periodo de calculo que cubre el mes calendario actual
-     * completo. Solo lo CREA si el usuario en sesion tiene permiso de
-     * ejecutar el calculo (RRHH/Administrador) — un Supervisor/Auditor que
-     * solo puede ver el reporte no debe generar periodos nuevos como efecto
-     * secundario de visitar la pantalla; para ellos, si el mes actual aun no
-     * tiene periodo, simplemente no hay nada que mostrar todavia.
+     * completo, para no obligar a crear uno manualmente cada vez que alguien
+     * quiere consultar "el mes en curso".
      */
     private function resolverPeriodoDelMesActual(): int
     {
-        $desde = date('Y-m-01');
-        $hasta = date('Y-m-t');
+        $nombre = 'Nomina ' . self::MESES_ES[(int) date('n')] . ' ' . date('Y');
+        return $this->resolverOCrearPeriodoPorRango(date('Y-m-01'), date('Y-m-t'), $nombre);
+    }
 
+    /** Busca (o crea) el periodo que cubre la semana actual (lunes a domingo). */
+    private function resolverPeriodoDeLaSemanaActual(): int
+    {
+        [$desde, $hasta] = $this->rangoSemanaActual();
+        return $this->resolverOCrearPeriodoPorRango($desde, $hasta, "Semana del {$desde} al {$hasta}");
+    }
+
+    /** Busca (o crea) el periodo que cubre unicamente el dia de hoy. */
+    private function resolverPeriodoDelDiaActual(): int
+    {
+        $hoy = date('Y-m-d');
+        return $this->resolverOCrearPeriodoPorRango($hoy, $hoy, "Dia {$hoy}");
+    }
+
+    /** @return array{0: string, 1: string} [lunes, domingo] de la semana calendario en curso */
+    private function rangoSemanaActual(): array
+    {
+        $hoy = new \DateTimeImmutable('today');
+        $diasDesdeLunes = ((int) $hoy->format('N')) - 1; // N: 1 (lunes) .. 7 (domingo)
+        $lunes = $hoy->modify("-{$diasDesdeLunes} days");
+        $domingo = $lunes->modify('+6 days');
+        return [$lunes->format('Y-m-d'), $domingo->format('Y-m-d')];
+    }
+
+    /**
+     * Busca un periodo con exactamente ese rango de fechas o lo crea si no
+     * existe — compartido por las 3 consultas rapidas (mes/semana/dia) para
+     * que ninguna requiera pasar por el formulario manual "Nuevo periodo".
+     * Solo CREA si el usuario en sesion tiene permiso de ejecutar el calculo
+     * (RRHH/Administrador/Supervisor) — un rol que solo puede ver el reporte
+     * no debe generar periodos nuevos como efecto secundario de visitar la
+     * pantalla; para ellos, si el rango pedido aun no tiene periodo,
+     * simplemente no hay nada que mostrar todavia.
+     */
+    private function resolverOCrearPeriodoPorRango(string $desde, string $hasta, string $nombre): int
+    {
         $periodo = PeriodoCalculoModel::porFechas($desde, $hasta);
         if ($periodo) {
             return (int) $periodo['id'];
@@ -100,7 +146,6 @@ class ReporteController
             return 0;
         }
 
-        $nombre = 'Nomina ' . self::MESES_ES[(int) date('n')] . ' ' . date('Y');
         return PeriodoCalculoModel::insert([
             'nombre' => $nombre,
             'fecha_inicio' => $desde,
@@ -263,11 +308,14 @@ class ReporteController
      * Para cada empleado en el alcance, suma por tipo de recargo el informe
      * dia-por-dia de ReporteHorasRegistroService (el mismo motor que "Horas
      * trabajadas (registro)", basado en marcaciones reales, no en el
-     * horario asignado) durante el rango pedido, y cuenta cuantos dias
-     * quedaron "incompleto" (sin marcaciones limpias) — un dia incompleto
-     * NO suma horas, asi que si hay varios el total puede estar
-     * subestimado; se muestra la cuenta para que RRHH lo revise antes de
-     * pagar, en vez de que pase desapercibido.
+     * horario asignado) durante el rango pedido, y cuenta:
+     *  - dias "incompleto" (sin marcaciones limpias, NO suman horas — si
+     *    hay varios el total puede estar subestimado, se muestra la cuenta
+     *    para que RRHH lo revise antes de pagar);
+     *  - dias "cerrado_automatico" (se les olvido marcar salida, pero SI se
+     *    estimo una hora de cierre y esas horas SI se suman al total — se
+     *    muestra la cuenta aparte para que quede visible que fueron
+     *    estimadas, no una marcacion real).
      *
      * @return array{0: array, 1: string[]}
      */
@@ -282,9 +330,12 @@ class ReporteController
 
             $recargos = [];
             $diasIncompletos = 0;
+            $diasCerradosAutomaticamente = 0;
             foreach ($informe as $dia) {
                 if ($dia['estado'] === 'incompleto') {
                     $diasIncompletos++;
+                } elseif ($dia['estado'] === 'cerrado_automatico') {
+                    $diasCerradosAutomaticamente++;
                 }
                 foreach ($dia['desglose'] as $d) {
                     $recargos[$d['codigo']] = ($recargos[$d['codigo']] ?? 0) + $d['horas'];
@@ -299,6 +350,7 @@ class ReporteController
                 'empleado_nombre' => $empleado['nombre'],
                 'recargos' => $recargos,
                 'total_horas' => array_sum($recargos),
+                'dias_cerrados_automaticamente' => $diasCerradosAutomaticamente,
                 'dias_incompletos' => $diasIncompletos,
             ];
         }
@@ -325,6 +377,34 @@ class ReporteController
 
         Session::flash('success', 'Periodo de calculo creado.');
         Response::redirect('/reportes/horas-extra?periodo_id=' . $id);
+    }
+
+    /**
+     * Elimina un periodo de calculo ya no usado. Restringido a quien ve
+     * TODAS las areas (no solo calculo.ejecutar): un periodo no es un
+     * recurso de una sola area, es compartido por toda la empresa, y
+     * borrarlo elimina en cascada el calculo_detalle de CUALQUIER empleado
+     * que tenga filas ahi (ver fk_calculodetalle_periodo ON DELETE CASCADE)
+     * — un Supervisor puede ejecutar/recalcular solo su propia area (ver
+     * calcular()), pero no debe poder borrar un periodo que otras areas
+     * todavia esten usando.
+     */
+    public function eliminarPeriodo(Request $request)
+    {
+        if (!Session::verifyCsrf($request->input('_csrf'))) {
+            Response::abort(419, 'Formulario expirado, intenta de nuevo.');
+            return;
+        }
+
+        if (!Auth::veTodasLasAreas()) {
+            Response::abort(403, 'No tienes permiso para eliminar periodos de calculo: afectaria a otras areas.');
+            return;
+        }
+
+        PeriodoCalculoModel::delete((int) $request->input('id'));
+
+        Session::flash('success', 'Periodo de calculo eliminado.');
+        Response::redirect('/reportes/horas-extra');
     }
 
     public function calcular(Request $request)

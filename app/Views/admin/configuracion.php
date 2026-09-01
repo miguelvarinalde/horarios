@@ -1,4 +1,12 @@
-<?php use App\Core\Session; use App\Core\View; ?>
+<?php
+use App\Core\Session;
+use App\Core\View;
+
+// Los valores de BD vienen "HH:MM:SS"; el patron del input de texto (24h)
+// solo acepta "HH:MM" (5 caracteres) — sin este recorte, precargar el
+// formulario dejaria un valor que no matchea su propio patron.
+$hora5 = fn (?string $valor, string $porDefecto) => View::e($valor ? substr($valor, 0, 5) : $porDefecto);
+?>
 <div class="card">
     <h2>Jornada semanal y recargo nocturno</h2>
     <p class="text-muted">Configuracion actualmente vigente:</p>
@@ -39,11 +47,11 @@
         <div class="form-row">
             <div class="form-group">
                 <label>Inicio recargo nocturno</label>
-                <input type="time" name="hora_inicio_recargo_nocturno" required value="<?= View::e($actual['hora_inicio_recargo_nocturno'] ?? '21:00') ?>">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora_inicio_recargo_nocturno" required value="<?= $hora5($actual['hora_inicio_recargo_nocturno'] ?? null, '21:00') ?>">
             </div>
             <div class="form-group">
                 <label>Fin recargo nocturno</label>
-                <input type="time" name="hora_fin_recargo_nocturno" required value="<?= View::e($actual['hora_fin_recargo_nocturno'] ?? '06:00') ?>">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora_fin_recargo_nocturno" required value="<?= $hora5($actual['hora_fin_recargo_nocturno'] ?? null, '06:00') ?>">
             </div>
         </div>
         <div class="form-group">
@@ -56,11 +64,11 @@
         <div id="bloque-almuerzo" class="form-row" style="<?= !empty($actual['almuerzo_activo']) ? '' : 'display:none' ?>">
             <div class="form-group">
                 <label>Inicio del almuerzo</label>
-                <input type="time" name="hora_inicio_almuerzo" value="<?= View::e($actual['hora_inicio_almuerzo'] ?? '12:00') ?>">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora_inicio_almuerzo" value="<?= $hora5($actual['hora_inicio_almuerzo'] ?? null, '12:00') ?>">
             </div>
             <div class="form-group">
                 <label>Fin del almuerzo</label>
-                <input type="time" name="hora_fin_almuerzo" value="<?= View::e($actual['hora_fin_almuerzo'] ?? '13:00') ?>">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora_fin_almuerzo" value="<?= $hora5($actual['hora_fin_almuerzo'] ?? null, '13:00') ?>">
             </div>
         </div>
         <div class="form-group">

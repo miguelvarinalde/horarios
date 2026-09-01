@@ -3,6 +3,13 @@
     <h2>Reporte de horas extra y recargos</h2>
     <p class="text-muted">Por empleado, cada tipo de recargo y el total de horas a pagar. Por defecto muestra el mes calendario actual; puedes elegir cualquier otro periodo ya creado.</p>
 
+    <div style="display:flex;gap:.5rem;margin-bottom:1rem">
+        <a href="/reportes/horas-extra?rango=dia" class="btn btn-sm">Hoy</a>
+        <a href="/reportes/horas-extra?rango=semana" class="btn btn-sm">Esta semana</a>
+        <a href="/reportes/horas-extra?rango=mes" class="btn btn-sm">Este mes</a>
+    </div>
+    <p class="text-muted" style="margin-top:-.75rem;font-size:.9em">Consulta rapida sin crear un periodo a mano: busca (o crea automaticamente, si tienes permiso de calculo) el periodo que cubre ese rango.</p>
+
     <?php if (!empty($periodos)): ?>
         <form method="get" action="/reportes/horas-extra" style="display:flex;gap:.5rem;align-items:end;margin-bottom:1rem">
             <div class="form-group mb-0">
@@ -90,5 +97,45 @@
         </div>
         <button type="submit" class="btn btn-primary">Crear periodo</button>
     </form>
+</div>
+<?php endif; ?>
+
+<?php if (!empty($puedeEliminarPeriodos)): ?>
+<div class="card">
+    <h2>Eliminar periodos</h2>
+    <p class="text-muted">Elimina periodos que ya no se usen (por ejemplo, pruebas o rangos creados por error). "Calculos" muestra cuantas filas de horas ya calculadas tiene ese periodo: eliminarlo tambien borra ese calculo, no solo el periodo.</p>
+    <div class="table-responsive">
+    <table>
+        <thead><tr><th>Nombre</th><th>Desde</th><th>Hasta</th><th>Calculos</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($periodosConConteo as $p): ?>
+            <tr>
+                <td><?= View::e($p['nombre']) ?></td>
+                <td><?= View::e($p['fecha_inicio']) ?></td>
+                <td><?= View::e($p['fecha_fin']) ?></td>
+                <td>
+                    <?php if ((int) $p['total_calculos'] > 0): ?>
+                        <span class="badge badge-pendiente"><?= (int) $p['total_calculos'] ?> filas</span>
+                    <?php else: ?>
+                        <span class="text-muted">Sin usar</span>
+                    <?php endif; ?>
+                </td>
+                <td>
+                    <form method="post" action="/reportes/periodos/eliminar" data-confirm="<?= (int) $p['total_calculos'] > 0
+                        ? '¿Eliminar el periodo &quot;' . View::e($p['nombre']) . '&quot;? Tiene ' . (int) $p['total_calculos'] . ' filas de calculo ya hecho, tambien se borraran.'
+                        : '¿Eliminar el periodo &quot;' . View::e($p['nombre']) . '&quot;?' ?>">
+                        <input type="hidden" name="_csrf" value="<?= View::e(Session::csrfToken()) ?>">
+                        <input type="hidden" name="id" value="<?= (int) $p['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        <?php if (empty($periodosConConteo)): ?>
+            <tr><td colspan="5" class="text-muted">No hay periodos de calculo creados todavia.</td></tr>
+        <?php endif; ?>
+        </tbody>
+    </table>
+    </div>
 </div>
 <?php endif; ?>

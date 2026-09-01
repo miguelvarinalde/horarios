@@ -63,6 +63,8 @@
                     <td>
                         <?php if ($dia['estado'] === 'completo'): ?>
                             <span class="badge badge-aprobado">Completo</span>
+                        <?php elseif ($dia['estado'] === 'cerrado_automatico'): ?>
+                            <span class="badge badge-pendiente" title="<?= View::e($dia['nota']) ?>">Cerrado automatico</span>
                         <?php elseif ($dia['estado'] === 'incompleto'): ?>
                             <span class="badge badge-rechazado" title="<?= View::e($dia['nota']) ?>">Incompleto</span>
                         <?php else: ?>
@@ -77,11 +79,14 @@
                                 <?= $m['tipo'] === 'entrada' ? 'Entrada' : 'Salida' ?> <?= substr($m['fecha_hora'], 11, 5) ?><br>
                             <?php endforeach; ?>
                         <?php endif; ?>
+                        <?php if ($dia['estado'] === 'cerrado_automatico' && $dia['salida_estimada']): ?>
+                            <span class="text-muted">Salida estimada <?= substr($dia['salida_estimada'], 0, 5) ?></span>
+                        <?php endif; ?>
                     </td>
                     <?php foreach ($columnas as $c): ?>
                         <td><?= isset($dia['recargos'][$c]) ? number_format($dia['recargos'][$c], 2) : '' ?></td>
                     <?php endforeach; ?>
-                    <td><strong><?= $dia['estado'] === 'completo' ? number_format($dia['horas_totales'], 2) : '&mdash;' ?></strong></td>
+                    <td><strong><?= in_array($dia['estado'], ['completo', 'cerrado_automatico'], true) ? number_format($dia['horas_totales'], 2) : '&mdash;' ?></strong></td>
                 </tr>
             <?php endforeach; ?>
             <?php if (empty($informe)): ?>

@@ -30,6 +30,7 @@
             <th>Empleado</th>
             <?php foreach ($columnas as $c): ?><th><?= View::e($c) ?></th><?php endforeach; ?>
             <th>Total</th>
+            <th>Dias cerrados automaticamente</th>
             <th>Dias incompletos</th>
         </tr>
         </thead>
@@ -42,6 +43,15 @@
                 <?php endforeach; ?>
                 <td><strong><?= number_format($f['total_horas'], 2) ?></strong></td>
                 <td>
+                    <?php if ($f['dias_cerrados_automaticamente'] > 0): ?>
+                        <span class="badge badge-pendiente" title="Dias en los que el empleado no marco salida: se estimo una hora de cierre segun horario programado o jornada asumida, y esas horas SI se sumaron al total. Revisa el detalle en Horas trabajadas (registro).">
+                            <?= (int) $f['dias_cerrados_automaticamente'] ?>
+                        </span>
+                    <?php else: ?>
+                        <span class="text-muted">0</span>
+                    <?php endif; ?>
+                </td>
+                <td>
                     <?php if ($f['dias_incompletos'] > 0): ?>
                         <span class="badge badge-rechazado" title="Dias con marcaciones que no alternan entrada/salida correctamente: no suman horas, revisa y corrige en Registros de entrada/salida.">
                             <?= (int) $f['dias_incompletos'] ?>
@@ -53,7 +63,7 @@
             </tr>
         <?php endforeach; ?>
         <?php if (empty($filas)): ?>
-            <tr><td colspan="<?= count($columnas) + 3 ?>" class="text-muted">No hay empleados en tu alcance, o no hay marcaciones en el rango seleccionado.</td></tr>
+            <tr><td colspan="<?= count($columnas) + 4 ?>" class="text-muted">No hay empleados en tu alcance, o no hay marcaciones en el rango seleccionado.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

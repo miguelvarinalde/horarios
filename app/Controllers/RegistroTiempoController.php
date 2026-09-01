@@ -17,6 +17,28 @@ class RegistroTiempoController
 {
     private const ESTADOS_UBICACION_VALIDOS = ['capturada', 'denegada', 'no_disponible', 'tiempo_agotado', 'no_soportado'];
 
+    /**
+     * Decide si la proxima marcacion debe ser "entrada" o "salida" a partir
+     * de la ultima marcacion registrada. Si la ultima fue una entrada de un
+     * dia ANTERIOR (se le olvido marcar salida ese dia), NO se arrastra el
+     * problema al dia siguiente: se vuelve a ofrecer "entrada" para
+     * empezar el nuevo dia limpio, en vez de forzar una "salida" que en
+     * realidad corresponderia al dia de ayer. El informe "Horas trabajadas
+     * (registro)" ya resuelve, aparte, que hora de salida asumir para ese
+     * dia anterior incompleto (ver ReporteHorasRegistroService) — esto
+     * solo evita que la confusion se propague hacia adelante en la
+     * pantalla de auto-marcacion.
+     */
+    private function siguienteTipoMarcacion(?array $ultimo): string
+    {
+        if (!$ultimo || $ultimo['tipo'] === 'salida') {
+            return 'entrada';
+        }
+
+        $fechaUltimo = substr($ultimo['fecha_hora'], 0, 10);
+        return $fechaUltimo === date('Y-m-d') ? 'salida' : 'entrada';
+    }
+
     /** Pantalla de auto-marcacion: consentimiento (primera vez) + boton + historial propio. */
     public function marcar(Request $request): string
     {
@@ -24,7 +46,7 @@ class RegistroTiempoController
         $empleado = EmpleadoModel::porUsuario((int) $usuario['id']);
 
         $ultimo = $empleado ? RegistroTiempoModel::ultimo((int) $empleado['id']) : null;
-        $siguienteTipo = (!$ultimo || $ultimo['tipo'] === 'salida') ? 'entrada' : 'salida';
+        $siguienteTipo = $this->siguienteTipoMarcacion($ultimo);
 
         return View::render('registros_tiempo/marcar', [
             'empleado' => $empleado,
@@ -71,7 +93,7 @@ class RegistroTiempoController
         // registro, no el cliente, para que no se pueda enviar dos entradas
         // seguidas manipulando el formulario.
         $ultimo = RegistroTiempoModel::ultimo((int) $empleado['id']);
-        $tipo = (!$ultimo || $ultimo['tipo'] === 'salida') ? 'entrada' : 'salida';
+        $tipo = $this->siguienteTipoMarcacion($ultimo);
 
         $estadoUbicacion = $request->input('ubicacion_estado');
         if (!in_array($estadoUbicacion, self::ESTADOS_UBICACION_VALIDOS, true)) {

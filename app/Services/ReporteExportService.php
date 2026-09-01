@@ -79,11 +79,17 @@ class ReporteExportService
             $col = 1;
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['fecha']);
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['es_domingo_o_festivo'] ? 'Si' : '');
-            $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['estado'] === 'completo' ? 'Completo' : ($dia['estado'] === 'incompleto' ? 'Incompleto: ' . $dia['nota'] : 'Sin marcaciones'));
+            $estadoTexto = match ($dia['estado']) {
+                'completo' => 'Completo',
+                'cerrado_automatico' => 'Cerrado automatico (salida estimada ' . substr((string) ($dia['salida_estimada'] ?? ''), 0, 5) . '): ' . $dia['nota'],
+                'incompleto' => 'Incompleto: ' . $dia['nota'],
+                default => 'Sin marcaciones',
+            };
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $estadoTexto);
             foreach ($columnas as $codigo) {
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos'][$codigo] ?? 0);
             }
-            $sheet->setCellValueByColumnAndRow($col, $fila, $dia['estado'] === 'completo' ? $dia['horas_totales'] : 0);
+            $sheet->setCellValueByColumnAndRow($col, $fila, in_array($dia['estado'], ['completo', 'cerrado_automatico'], true) ? $dia['horas_totales'] : 0);
             $fila++;
         }
 
@@ -123,6 +129,7 @@ class ReporteExportService
             $sheet->setCellValueByColumnAndRow($col++, 1, $codigo);
         }
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Total horas');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Dias cerrados automaticamente');
         $sheet->setCellValueByColumnAndRow($col, 1, 'Dias incompletos');
         $ultimaColumna = $col;
 
@@ -134,6 +141,7 @@ class ReporteExportService
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['recargos'][$codigo] ?? 0);
             }
             $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['total_horas']);
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['dias_cerrados_automaticamente']);
             $sheet->setCellValueByColumnAndRow($col, $fila, $registro['dias_incompletos']);
             $fila++;
         }

@@ -55,11 +55,11 @@
         <div class="form-row">
             <div class="form-group">
                 <label>Hora inicio (dejar vacio si es de dia completo)</label>
-                <input type="time" name="hora_inicio">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora_inicio">
             </div>
             <div class="form-group">
                 <label>Hora fin</label>
-                <input type="time" name="hora_fin">
+                <input type="text" inputmode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" maxlength="5" title="Formato de 24 horas, ej. 14:30" name="hora_fin">
             </div>
         </div>
 

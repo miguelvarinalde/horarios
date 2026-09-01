@@ -21,4 +21,22 @@ class PeriodoCalculoModel extends Model
         $row = $stmt->fetch();
         return $row ?: null;
     }
+
+    /**
+     * Todos los periodos con la cantidad de filas de calculo_detalle que
+     * tiene cada uno, para la pantalla de "eliminar periodos" — asi se ve
+     * de un vistazo cuales ya tienen calculo hecho (eliminarlos borra ese
+     * calculo en cascada) y cuales estan vacios/sin usar.
+     *
+     * @return array<int, array{id:int, nombre:string, fecha_inicio:string, fecha_fin:string, estado:string, total_calculos:int}>
+     */
+    public static function todosConConteoCalculos(string $orderBy = 'pc.fecha_inicio DESC'): array
+    {
+        $sql = "SELECT pc.*, COUNT(cd.id) AS total_calculos
+                FROM periodos_calculo pc
+                LEFT JOIN calculo_detalle cd ON cd.periodo_calculo_id = pc.id
+                GROUP BY pc.id
+                ORDER BY {$orderBy}";
+        return static::db()->query($sql)->fetchAll();
+    }
 }

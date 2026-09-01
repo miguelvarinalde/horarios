@@ -111,6 +111,7 @@ $router->get('/calendario', [CalendarioController::class, 'index'], [[RbacMiddle
 // --- Reportes ---
 $router->get('/reportes/horas-extra', [ReporteController::class, 'index'], [[RbacMiddleware::class, 'reportes.ver']]);
 $router->post('/reportes/periodos', [ReporteController::class, 'crearPeriodo'], [[RbacMiddleware::class, 'calculo.ejecutar']]);
+$router->post('/reportes/periodos/eliminar', [ReporteController::class, 'eliminarPeriodo'], [[RbacMiddleware::class, 'calculo.ejecutar']]);
 $router->post('/reportes/horas-extra/calcular', [ReporteController::class, 'calcular'], [[RbacMiddleware::class, 'calculo.ejecutar']]);
 $router->get('/reportes/horas-extra/exportar-excel', [ReporteController::class, 'exportarExcel'], [[RbacMiddleware::class, 'reportes.exportar']]);
 $router->get('/reportes/horas-extra/exportar-pdf', [ReporteController::class, 'exportarPdf'], [[RbacMiddleware::class, 'reportes.exportar']]);
