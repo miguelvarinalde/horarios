@@ -31,6 +31,7 @@
             <?php foreach ($columnas as $c): ?><th><?= View::e($c) ?></th><?php endforeach; ?>
             <th>Total</th>
             <th>Dias cerrados automaticamente</th>
+            <th>Dias en curso</th>
             <th>Dias incompletos</th>
         </tr>
         </thead>
@@ -52,6 +53,15 @@
                     <?php endif; ?>
                 </td>
                 <td>
+                    <?php if ($f['dias_en_curso'] > 0): ?>
+                        <span class="text-muted" title="Hoy: el empleado todavia no ha marcado salida, la jornada esta en curso. No es un error, solo informativo.">
+                            <?= (int) $f['dias_en_curso'] ?>
+                        </span>
+                    <?php else: ?>
+                        <span class="text-muted">0</span>
+                    <?php endif; ?>
+                </td>
+                <td>
                     <?php if ($f['dias_incompletos'] > 0): ?>
                         <span class="badge badge-rechazado" title="Dias con marcaciones que no alternan entrada/salida correctamente: no suman horas, revisa y corrige en Registros de entrada/salida.">
                             <?= (int) $f['dias_incompletos'] ?>
@@ -63,7 +73,7 @@
             </tr>
         <?php endforeach; ?>
         <?php if (empty($filas)): ?>
-            <tr><td colspan="<?= count($columnas) + 4 ?>" class="text-muted">No hay empleados en tu alcance, o no hay marcaciones en el rango seleccionado.</td></tr>
+            <tr><td colspan="<?= count($columnas) + 5 ?>" class="text-muted">No hay empleados en tu alcance, o no hay marcaciones en el rango seleccionado.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

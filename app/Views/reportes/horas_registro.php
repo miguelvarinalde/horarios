@@ -45,10 +45,13 @@
                 <th>Fecha</th>
                 <th>Estado</th>
                 <th>Marcaciones</th>
+                <th title="Primera entrada del dia. Debajo, redondeada al bloque de 30 min mas cercano.">Entrada</th>
+                <th title="Ultima salida del dia (o la estimada, si el dia se cerro automatico). Debajo, redondeada al bloque de 30 min mas cercano.">Salida</th>
                 <?php foreach ($columnas as $c): ?>
-                    <th title="<?= View::e($nombresPorCodigo[$c] ?? $c) ?>"><?= View::e($c) ?></th>
+                    <th title="<?= View::e($nombresPorCodigo[$c] ?? $c) ?>. Debajo, redondeado al bloque de 30 min mas cercano."><?= View::e($c) ?></th>
                 <?php endforeach; ?>
                 <th>Total</th>
+                <th title="Suma de los segmentos trabajados con la entrada y la salida de cada uno redondeadas al bloque de 30 min mas cercano.">Total redondeado</th>
             </tr>
             </thead>
             <tbody>
@@ -67,6 +70,8 @@
                             <span class="badge badge-pendiente" title="<?= View::e($dia['nota']) ?>">Cerrado automatico</span>
                         <?php elseif ($dia['estado'] === 'incompleto'): ?>
                             <span class="badge badge-rechazado" title="<?= View::e($dia['nota']) ?>">Incompleto</span>
+                        <?php elseif ($dia['estado'] === 'en_curso'): ?>
+                            <span class="text-muted" title="<?= View::e($dia['nota']) ?>">En curso</span>
                         <?php else: ?>
                             <span class="text-muted">Sin marcaciones</span>
                         <?php endif; ?>
@@ -81,16 +86,40 @@
                         <?php endif; ?>
                         <?php if ($dia['estado'] === 'cerrado_automatico' && $dia['salida_estimada']): ?>
                             <span class="text-muted">Salida estimada <?= substr($dia['salida_estimada'], 0, 5) ?></span>
+                        <?php elseif ($dia['estado'] === 'en_curso'): ?>
+                            <span class="text-muted">Jornada en curso</span>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <?php if ($dia['primera_entrada']): ?>
+                            <?= substr($dia['primera_entrada'], 0, 5) ?><br>
+                            <span class="text-muted" style="font-size:.85em">&asymp; <?= substr($dia['primera_entrada_redondeada'], 0, 5) ?></span>
+                        <?php else: ?>
+                            <span class="text-muted">&mdash;</span>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <?php if ($dia['ultima_salida']): ?>
+                            <?= substr($dia['ultima_salida'], 0, 5) ?><br>
+                            <span class="text-muted" style="font-size:.85em">&asymp; <?= substr($dia['ultima_salida_redondeada'], 0, 5) ?></span>
+                        <?php else: ?>
+                            <span class="text-muted">&mdash;</span>
                         <?php endif; ?>
                     </td>
                     <?php foreach ($columnas as $c): ?>
-                        <td><?= isset($dia['recargos'][$c]) ? number_format($dia['recargos'][$c], 2) : '' ?></td>
+                        <td>
+                            <?= isset($dia['recargos'][$c]) ? number_format($dia['recargos'][$c], 2) : '' ?>
+                            <?php if (isset($dia['recargos_redondeados'][$c])): ?>
+                                <br><span class="text-muted" style="font-size:.85em">&asymp; <?= number_format($dia['recargos_redondeados'][$c], 2) ?></span>
+                            <?php endif; ?>
+                        </td>
                     <?php endforeach; ?>
-                    <td><strong><?= in_array($dia['estado'], ['completo', 'cerrado_automatico'], true) ? number_format($dia['horas_totales'], 2) : '&mdash;' ?></strong></td>
+                    <td><strong><?= in_array($dia['estado'], ['completo', 'cerrado_automatico', 'en_curso'], true) ? number_format($dia['horas_totales'], 2) : '&mdash;' ?></strong></td>
+                    <td><?= $dia['horas_totales_redondeadas'] !== null ? number_format($dia['horas_totales_redondeadas'], 2) : '&mdash;' ?></td>
                 </tr>
             <?php endforeach; ?>
             <?php if (empty($informe)): ?>
-                <tr><td colspan="<?= count($columnas) + 4 ?>" class="text-muted">Sin datos para el rango seleccionado.</td></tr>
+                <tr><td colspan="<?= count($columnas) + 7 ?>" class="text-muted">Sin datos para el rango seleccionado.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>

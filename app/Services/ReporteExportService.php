@@ -54,7 +54,7 @@ class ReporteExportService
      * Informe dia por dia de un solo empleado (Horas trabajadas segun registro), con una
      * columna independiente por cada tipo de recargo que aparezca en el rango.
      *
-     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, horas_totales:float, recargos: array<string,float>}> $filas
+     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en el orden en que deben mostrarse
      * @param array<string,string> $nombresPorCodigo codigo => nombre completo del tipo de recargo
      */
@@ -68,10 +68,16 @@ class ReporteExportService
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Fecha');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Dom/Festivo');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Estado');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Entrada');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Entrada redondeada');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida redondeada');
         foreach ($columnas as $codigo) {
             $sheet->setCellValueByColumnAndRow($col++, 1, $nombresPorCodigo[$codigo] ?? $codigo);
+            $sheet->setCellValueByColumnAndRow($col++, 1, ($nombresPorCodigo[$codigo] ?? $codigo) . ' (redondeado)');
         }
-        $sheet->setCellValueByColumnAndRow($col, 1, 'Total horas');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Total horas');
+        $sheet->setCellValueByColumnAndRow($col, 1, 'Total redondeado');
         $ultimaColumna = $col;
 
         $fila = 2;
@@ -82,14 +88,21 @@ class ReporteExportService
             $estadoTexto = match ($dia['estado']) {
                 'completo' => 'Completo',
                 'cerrado_automatico' => 'Cerrado automatico (salida estimada ' . substr((string) ($dia['salida_estimada'] ?? ''), 0, 5) . '): ' . $dia['nota'],
+                'en_curso' => 'En curso: ' . $dia['nota'],
                 'incompleto' => 'Incompleto: ' . $dia['nota'],
                 default => 'Sin marcaciones',
             };
             $sheet->setCellValueByColumnAndRow($col++, $fila, $estadoTexto);
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['primera_entrada'] ? substr($dia['primera_entrada'], 0, 5) : '');
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['primera_entrada_redondeada'] ? substr($dia['primera_entrada_redondeada'], 0, 5) : '');
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['ultima_salida'] ? substr($dia['ultima_salida'], 0, 5) : '');
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['ultima_salida_redondeada'] ? substr($dia['ultima_salida_redondeada'], 0, 5) : '');
             foreach ($columnas as $codigo) {
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos'][$codigo] ?? 0);
+                $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos_redondeados'][$codigo] ?? 0);
             }
-            $sheet->setCellValueByColumnAndRow($col, $fila, in_array($dia['estado'], ['completo', 'cerrado_automatico'], true) ? $dia['horas_totales'] : 0);
+            $sheet->setCellValueByColumnAndRow($col++, $fila, in_array($dia['estado'], ['completo', 'cerrado_automatico', 'en_curso'], true) ? $dia['horas_totales'] : 0);
+            $sheet->setCellValueByColumnAndRow($col, $fila, $dia['horas_totales_redondeadas'] ?? 0);
             $fila++;
         }
 
@@ -114,7 +127,7 @@ class ReporteExportService
      * cuantos dias quedaron incompletos en el rango (para que RRHH revise
      * antes de pagar si el total podria estar subestimado).
      *
-     * @param array<int, array{empleado_nombre:string, recargos: array<string,float>, total_horas: float, dias_incompletos: int}> $filas
+     * @param array<int, array{empleado_nombre:string, recargos: array<string,float>, total_horas: float, dias_cerrados_automaticamente: int, dias_en_curso: int, dias_incompletos: int}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en orden
      */
     public function generarExcelNominaRegistro(array $filas, array $columnas, string $desde, string $hasta): void
@@ -130,6 +143,7 @@ class ReporteExportService
         }
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Total horas');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Dias cerrados automaticamente');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Dias en curso');
         $sheet->setCellValueByColumnAndRow($col, 1, 'Dias incompletos');
         $ultimaColumna = $col;
 
@@ -142,6 +156,7 @@ class ReporteExportService
             }
             $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['total_horas']);
             $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['dias_cerrados_automaticamente']);
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['dias_en_curso']);
             $sheet->setCellValueByColumnAndRow($col, $fila, $registro['dias_incompletos']);
             $fila++;
         }

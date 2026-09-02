@@ -248,6 +248,20 @@ class ReporteController
                     $columnas[] = $d['codigo'];
                 }
             }
+
+            // Version redondeada del mismo desglose (a pedido del usuario,
+            // 2026-09-02), misma columna que la exacta — cualquier codigo
+            // que solo aparezca en el redondeado (poco probable, pero
+            // posible si el redondeo mueve un segmento a traves de la
+            // ventana nocturna) tambien gana su columna.
+            $dia['recargos_redondeados'] = [];
+            foreach ($dia['desglose_redondeado'] as $d) {
+                $dia['recargos_redondeados'][$d['codigo']] = $d['horas'];
+                $nombresPorCodigo[$d['codigo']] = $d['nombre'];
+                if (!in_array($d['codigo'], $columnas, true)) {
+                    $columnas[] = $d['codigo'];
+                }
+            }
         }
         unset($dia);
 
@@ -315,7 +329,10 @@ class ReporteController
      *  - dias "cerrado_automatico" (se les olvido marcar salida, pero SI se
      *    estimo una hora de cierre y esas horas SI se suman al total — se
      *    muestra la cuenta aparte para que quede visible que fueron
-     *    estimadas, no una marcacion real).
+     *    estimadas, no una marcacion real);
+     *  - dias "en_curso" (hoy, todavia sin marcar salida — no es un error
+     *    ni una estimacion, solo informativo de que la jornada de hoy aun
+     *    no termina; solo puede haber como maximo un dia asi en el rango).
      *
      * @return array{0: array, 1: string[]}
      */
@@ -331,11 +348,14 @@ class ReporteController
             $recargos = [];
             $diasIncompletos = 0;
             $diasCerradosAutomaticamente = 0;
+            $diasEnCurso = 0;
             foreach ($informe as $dia) {
                 if ($dia['estado'] === 'incompleto') {
                     $diasIncompletos++;
                 } elseif ($dia['estado'] === 'cerrado_automatico') {
                     $diasCerradosAutomaticamente++;
+                } elseif ($dia['estado'] === 'en_curso') {
+                    $diasEnCurso++;
                 }
                 foreach ($dia['desglose'] as $d) {
                     $recargos[$d['codigo']] = ($recargos[$d['codigo']] ?? 0) + $d['horas'];
@@ -351,6 +371,7 @@ class ReporteController
                 'recargos' => $recargos,
                 'total_horas' => array_sum($recargos),
                 'dias_cerrados_automaticamente' => $diasCerradosAutomaticamente,
+                'dias_en_curso' => $diasEnCurso,
                 'dias_incompletos' => $diasIncompletos,
             ];
         }

@@ -40,8 +40,16 @@ use DateTimeImmutable;
  * los reportes que la hora de salida es estimada, no una marcacion real).
  * Cualquier OTRA forma de numero impar o de orden invalido (ej. una salida
  * suelta al principio) sigue quedando 'incompleto' sin adivinar nada —
- * ver emparejarDia(). La regla de cierre (ver calcularSalidaAutomatica())
- * es, en orden de prioridad:
+ * ver emparejarDia(). IMPORTANTE: el cierre automatico solo aplica a dias
+ * YA TERMINADOS (estrictamente antes de hoy) — la regla original la pidio
+ * el usuario para horarios que "no tengan salida a las 11:59 PM", es decir
+ * evaluada al final del dia, no a mitad de jornada. Si la ultima entrada
+ * suelta es la de HOY, el empleado bien puede seguir trabajando: el dia
+ * queda 'en_curso' (ni error, ni una salida estimada) hasta que termine y
+ * un reporte generado un dia despues (o mas tarde el mismo dia, ya pasada
+ * la medianoche) lo cierre automaticamente si de verdad se le olvido. La
+ * regla de cierre (ver calcularSalidaAutomatica()) es, en orden de
+ * prioridad:
  *  1. Si el empleado tiene horario_base programado ese dia, la salida es
  *     la hora de fin de su ultimo bloque programado ese dia.
  *  2. Si no hay horario programado y esa entrada es la UNICA marcacion del
@@ -79,11 +87,29 @@ use DateTimeImmutable;
  * almorzar) y ese par cubre por completo la ventana de almuerzo, se resta.
  * Si el empleado SI marco salida/entrada para almorzar (2+ pares), se
  * confia en la marcacion real y no se resta nada de mas.
+ *
+ * Primera entrada / ultima salida y horas redondeadas (2026-09-02, a
+ * pedido del usuario): ademas del desglose exacto, cada dia expone la
+ * primera entrada y la ultima salida (el "bookend" del dia, no cada
+ * marcacion intermedia) y una version de esas mismas horas y del total
+ * redondeadas al bloque de 30 minutos mas cercano (ver redondearHora()).
+ * El redondeo se aplica a los segmentos ya definitivos (despues de fusion
+ * de marcaciones casi seguidas y descuento de almuerzo) y se suma
+ * segmento por segmento, para que un turno partido no cuente como
+ * trabajado el hueco entre bloques. Es puramente informativo para este
+ * reporte de auditoria: nunca se persiste, nunca alimenta el motor legal
+ * ni su clasificacion por tipo de recargo.
  */
 class ReporteHorasRegistroService
 {
-    /** Estados de dia cuyas horas SI cuentan (a diferencia de 'incompleto'/'sin_marcaciones'). */
-    private const ESTADOS_CON_HORAS = ['completo', 'cerrado_automatico'];
+    /**
+     * Estados de dia cuyas horas SI cuentan (a diferencia de
+     * 'incompleto'/'sin_marcaciones'). 'en_curso' esta incluido porque sus
+     * segmentos son SIEMPRE pares entrada/salida ya completados de verdad
+     * (nunca incluyen la ultima entrada suelta sin cerrar) — ver
+     * emparejarDia().
+     */
+    private const ESTADOS_CON_HORAS = ['completo', 'cerrado_automatico', 'en_curso'];
 
     /** Hueco maximo (minutos) entre dos segmentos para considerarlos una marcacion doble accidental y fusionarlos. */
     private const UMBRAL_FUSION_MARCACIONES_MINUTOS = 2;
@@ -91,7 +117,11 @@ class ReporteHorasRegistroService
     /**
      * @return array<int, array{
      *   fecha: string, estado: string, nota: ?string, marcaciones: array,
-     *   horas_totales: float, desglose: array<int, array{codigo:string,nombre:string,horas:float}>
+     *   salida_estimada: ?string, primera_entrada: ?string, ultima_salida: ?string,
+     *   primera_entrada_redondeada: ?string, ultima_salida_redondeada: ?string,
+     *   horas_totales: float, horas_totales_redondeadas: ?float,
+     *   desglose: array<int, array{codigo:string,nombre:string,horas:float}>,
+     *   desglose_redondeado: array<int, array{codigo:string,nombre:string,horas:float}>
      * }>
      */
     public function generarInforme(int $empleadoId, string $desde, string $hasta): array
@@ -107,6 +137,12 @@ class ReporteHorasRegistroService
 
         $resultado = [];
         $acumuladoSemanal = 0.0;
+        // Acumulado semanal aparte para el universo "redondeado" (ver mas
+        // abajo): no se mezcla con el exacto porque un dia redondeado puede
+        // sumar mas o menos horas que el mismo dia exacto, y el reparto
+        // ordinaria/extra de CADA dia debe repartirse contra el acumulado
+        // de SU MISMO universo, no contra el del otro.
+        $acumuladoSemanalRedondeado = 0.0;
         $semanaActual = null;
 
         $cursor = new DateTimeImmutable($inicioSemana);
@@ -117,6 +153,7 @@ class ReporteHorasRegistroService
             $claveSemana = $cursor->format('o-\WW');
             if ($claveSemana !== $semanaActual) {
                 $acumuladoSemanal = 0.0;
+                $acumuladoSemanalRedondeado = 0.0;
                 $semanaActual = $claveSemana;
             }
 
@@ -140,42 +177,64 @@ class ReporteHorasRegistroService
 
             $esDomingoOFestivo = ($cursor->format('w') === '0') || isset($festivos[$fecha]);
 
-            $horasTotales = 0.0;
-            $desglosePorTipo = [];
+            [$horasTotales, $desglosePorTipo] = in_array($estado, self::ESTADOS_CON_HORAS, true)
+                ? $this->clasificarSegmentos($segmentos, $fecha, $esDomingoOFestivo, $inicioNocturno, $finNocturno, $jornadaSemanal, $acumuladoSemanal)
+                : [0.0, []];
 
-            if (in_array($estado, self::ESTADOS_CON_HORAS, true)) {
-                foreach ($segmentos as $segmento) {
-                    $subsegmentos = $this->dividirPorVentanaNocturna(
-                        $this->normalizar($segmento['hora_inicio']),
-                        $this->normalizar($segmento['hora_fin']),
-                        $inicioNocturno,
-                        $finNocturno
-                    );
+            $salidaEstimada = ($estado === 'cerrado_automatico' && !empty($segmentos)) ? end($segmentos)['hora_fin'] : null;
 
-                    foreach ($subsegmentos as $sub) {
-                        $partes = $this->repartirPorAcumuladoSemanal($sub['horas'], $acumuladoSemanal, $jornadaSemanal);
-                        $acumuladoSemanal += $sub['horas'];
+            // Primera entrada / ultima salida del dia, para las columnas
+            // independientes del reporte (a pedido del usuario, 2026-09-02).
+            // Son solo el "bookend" del dia (la primera marcacion y la
+            // salida final), no cada marcacion intermedia: para el detalle
+            // completo (turnos partidos, correcciones) sigue estando la
+            // columna "marcaciones". La ultima salida usa la estimada
+            // cuando el dia se cerro automatico, para que la columna sea
+            // consistente con lo que realmente se conto como salida.
+            $primeraEntrada = (!empty($marcacionesDelDia) && $marcacionesDelDia[0]['tipo'] === 'entrada')
+                ? substr($marcacionesDelDia[0]['fecha_hora'], 11, 8)
+                : null;
+            $ultimaSalida = match (true) {
+                $estado === 'completo' => substr(end($marcacionesDelDia)['fecha_hora'], 11, 8),
+                $estado === 'cerrado_automatico' => $salidaEstimada,
+                default => null, // 'en_curso'/'incompleto'/'sin_marcaciones': todavia no hay una salida real ni estimada que mostrar.
+            };
 
-                        foreach ($partes as $parte) {
-                            if ($parte['horas'] <= 0.0001) {
-                                continue;
-                            }
-
-                            $horasTotales += $parte['horas'];
-
-                            $tipoRecargo = TipoRecargoModel::buscarPorFlags($fecha, $parte['es_extra'], $sub['es_nocturno'], $esDomingoOFestivo);
-                            $clave = $tipoRecargo['codigo'] ?? 'sin_clasificar';
-                            if (!isset($desglosePorTipo[$clave])) {
-                                $desglosePorTipo[$clave] = [
-                                    'codigo' => $clave,
-                                    'nombre' => $tipoRecargo['nombre'] ?? 'Sin clasificar',
-                                    'horas' => 0.0,
-                                ];
-                            }
-                            $desglosePorTipo[$clave]['horas'] += $parte['horas'];
-                        }
-                    }
+            // Horas redondeadas (a pedido del usuario, 2026-09-02, y su
+            // desglose por tipo de recargo tambien redondeado, agregado el
+            // mismo dia a pedido explicito de "los recargos tambien deben
+            // quedar redondeados"): mismo criterio de redondeo (30 min, al
+            // mas cercano) aplicado a la hora de inicio/fin de cada
+            // segmento ya definitivo (los mismos que se usaron para el
+            // calculo exacto, es decir despues de fusionar marcaciones casi
+            // seguidas y descontar almuerzo) — asi un turno partido no
+            // cuenta como trabajado el hueco entre bloques, y el almuerzo
+            // ya descontado se respeta igual en la version redondeada.
+            // Los segmentos redondeados se clasifican con la MISMA logica
+            // que los exactos (clasificarSegmentos: ventana nocturna,
+            // reparto ordinaria/extra) pero contra su PROPIO acumulado
+            // semanal (acumuladoSemanalRedondeado), para no mezclar los dos
+            // universos. Es informativo/auditoria: no reemplaza el calculo
+            // exacto ni alimenta el motor legal.
+            $segmentosRedondeados = [];
+            foreach ($segmentos as $segmento) {
+                $inicioRedondeado = $this->redondearHora($this->normalizar($segmento['hora_inicio']));
+                $finRedondeado = $this->redondearHora($this->normalizar($segmento['hora_fin']));
+                if ($finRedondeado > $inicioRedondeado) {
+                    // Un segmento muy corto puede redondear a duracion cero
+                    // (o, en un caso extremo, invertirse) si ambos extremos
+                    // caen en el mismo bloque de 30 min o en bloques
+                    // adyacentes mal alineados; se omite en vez de sumar
+                    // horas negativas o inventadas.
+                    $segmentosRedondeados[] = ['hora_inicio' => $inicioRedondeado, 'hora_fin' => $finRedondeado];
                 }
+            }
+
+            [$horasTotalesRedondeadas, $desglosePorTipoRedondeado] = in_array($estado, self::ESTADOS_CON_HORAS, true)
+                ? $this->clasificarSegmentos($segmentosRedondeados, $fecha, $esDomingoOFestivo, $inicioNocturno, $finNocturno, $jornadaSemanal, $acumuladoSemanalRedondeado)
+                : [null, []];
+            if ($horasTotalesRedondeadas !== null) {
+                $horasTotalesRedondeadas = round($horasTotalesRedondeadas, 2);
             }
 
             $resultado[] = [
@@ -188,9 +247,15 @@ class ReporteHorasRegistroService
                 // salida que se calculo, para mostrarla explicitamente en
                 // vez de que RRHH solo vea el total de horas sin saber a
                 // que hora se asumio que salio.
-                'salida_estimada' => ($estado === 'cerrado_automatico' && !empty($segmentos)) ? end($segmentos)['hora_fin'] : null,
+                'salida_estimada' => $salidaEstimada,
+                'primera_entrada' => $primeraEntrada,
+                'ultima_salida' => $ultimaSalida,
+                'primera_entrada_redondeada' => $primeraEntrada ? $this->redondearHora($this->normalizar($primeraEntrada)) : null,
+                'ultima_salida_redondeada' => $ultimaSalida ? $this->redondearHora($this->normalizar($ultimaSalida)) : null,
                 'horas_totales' => round($horasTotales, 2),
+                'horas_totales_redondeadas' => $horasTotalesRedondeadas,
                 'desglose' => array_values($desglosePorTipo),
+                'desglose_redondeado' => array_values($desglosePorTipoRedondeado),
             ];
 
             $cursor = $cursor->modify('+1 day');
@@ -261,6 +326,15 @@ class ReporteHorasRegistroService
             return [[], 'incompleto', 'Numero impar de marcaciones (falta una entrada o salida).'];
         }
 
+        if ($fecha >= date('Y-m-d')) {
+            // El dia todavia no termina (es hoy): la entrada suelta puede
+            // ser simplemente que el empleado sigue trabajando, no que se
+            // le "olvido" nada. No se calcula ninguna salida estimada; los
+            // pares ya completados antes de esta entrada (si los hay, ej.
+            // jornada fraccionada ya en curso) SI cuentan sus horas.
+            return [$segmentos, 'en_curso', 'El empleado aun no ha marcado salida hoy: la jornada esta en curso.'];
+        }
+
         $horaEntrada = substr($ultima['fecha_hora'], 11, 8);
         [$horaSalidaCalculada, $nota] = $this->calcularSalidaAutomatica($empleadoId, $fecha, $horaEntrada, $segmentos);
 
@@ -319,6 +393,23 @@ class ReporteHorasRegistroService
     }
 
     /**
+     * Redondea una hora "HH:MM:SS" al bloque de minutos mas cercano (30 por
+     * defecto, a pedido del usuario). Empate exacto (ej. minuto 15 con
+     * bloques de 30) redondea hacia arriba. Solo para las columnas/total
+     * "redondeado" del reporte de horas segun registro — nunca se usa para
+     * el calculo legal ni se persiste en ningun lado.
+     */
+    private function redondearHora(string $hora, int $minutos = 30): string
+    {
+        [$h, $m, $s] = array_map('intval', explode(':', $hora));
+        $segundos = $h * 3600 + $m * 60 + $s;
+        $bloque = $minutos * 60;
+        $redondeado = (int) floor(($segundos + $bloque / 2) / $bloque) * $bloque;
+        $redondeado = max(0, min($redondeado, 23 * 3600 + 59 * 60 + 59));
+        return sprintf('%02d:%02d:%02d', intdiv($redondeado, 3600), intdiv($redondeado % 3600, 60), $redondeado % 60);
+    }
+
+    /**
      * Fusiona segmentos consecutivos separados por un hueco casi nulo (ver
      * docblock de la clase): una salida seguida casi de inmediato por una
      * nueva entrada no es un turno partido real, es casi con certeza una
@@ -374,6 +465,59 @@ class ReporteHorasRegistroService
             $resultado[] = ['hora_inicio' => $finAlmuerzo, 'hora_fin' => $segmento['hora_fin']];
         }
         return $resultado;
+    }
+
+    /**
+     * Clasifica una lista de segmentos (ya fusionados y con almuerzo
+     * descontado) en horas por tipo de recargo: divide cada uno por ventana
+     * nocturna y reparte contra el acumulado semanal recibido (por
+     * referencia, se va incrementando). Compartido entre el calculo exacto
+     * y el redondeado (ver generarInforme()) — mismo criterio de
+     * clasificacion, cada uno con su propio acumulado semanal para no
+     * mezclar los dos universos.
+     *
+     * @param array<int, array{hora_inicio:string, hora_fin:string}> $segmentos
+     * @return array{0: float, 1: array<string, array{codigo:string,nombre:string,horas:float}>}
+     */
+    private function clasificarSegmentos(array $segmentos, string $fecha, bool $esDomingoOFestivo, string $inicioNocturno, string $finNocturno, float $jornadaSemanal, float &$acumuladoSemanal): array
+    {
+        $horasTotales = 0.0;
+        $desglosePorTipo = [];
+
+        foreach ($segmentos as $segmento) {
+            $subsegmentos = $this->dividirPorVentanaNocturna(
+                $this->normalizar($segmento['hora_inicio']),
+                $this->normalizar($segmento['hora_fin']),
+                $inicioNocturno,
+                $finNocturno
+            );
+
+            foreach ($subsegmentos as $sub) {
+                $partes = $this->repartirPorAcumuladoSemanal($sub['horas'], $acumuladoSemanal, $jornadaSemanal);
+                $acumuladoSemanal += $sub['horas'];
+
+                foreach ($partes as $parte) {
+                    if ($parte['horas'] <= 0.0001) {
+                        continue;
+                    }
+
+                    $horasTotales += $parte['horas'];
+
+                    $tipoRecargo = TipoRecargoModel::buscarPorFlags($fecha, $parte['es_extra'], $sub['es_nocturno'], $esDomingoOFestivo);
+                    $clave = $tipoRecargo['codigo'] ?? 'sin_clasificar';
+                    if (!isset($desglosePorTipo[$clave])) {
+                        $desglosePorTipo[$clave] = [
+                            'codigo' => $clave,
+                            'nombre' => $tipoRecargo['nombre'] ?? 'Sin clasificar',
+                            'horas' => 0.0,
+                        ];
+                    }
+                    $desglosePorTipo[$clave]['horas'] += $parte['horas'];
+                }
+            }
+        }
+
+        return [$horasTotales, $desglosePorTipo];
     }
 
     /** Divide [horaInicio, horaFin) en sub-segmentos diurno/nocturno. */
