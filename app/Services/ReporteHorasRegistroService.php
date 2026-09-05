@@ -82,11 +82,16 @@ use DateTimeImmutable;
  *
  * Descuento automatico de almuerzo: mismo criterio y misma configuracion
  * (configuracion_global.almuerzo_activo) que CalculoRecargosService, pero
- * aplicado sobre las marcaciones reales en vez del horario asignado. Si el
- * dia tiene un UNICO par entrada/salida (el empleado no marco aparte para
- * almorzar) y ese par cubre por completo la ventana de almuerzo, se resta.
- * Si el empleado SI marco salida/entrada para almorzar (2+ pares), se
- * confia en la marcacion real y no se resta nada de mas.
+ * aplicado sobre las marcaciones reales en vez del horario asignado. Se
+ * evalua CADA segmento (par entrada/salida ya fusionado/definitivo) por
+ * separado, no el dia completo (corregido 2026-09-05): si un segmento
+ * cubre por completo la ventana de almuerzo, se resta de ESE segmento, sin
+ * importar cuantos otros segmentos tenga el dia — un turno partido
+ * "normal" alrededor del mediodia no descuenta nada extra porque ningun
+ * segmento individual cubre la ventana completa por si solo. Ademas
+ * (2026-09-02): la salida (de ese segmento) debe quedar al menos
+ * UMBRAL_MINIMO_ALMUERZO_MINUTOS despues del fin de almuerzo configurado
+ * para que aplique el descuento — ver descontarAlmuerzo().
  *
  * Primera entrada / ultima salida y horas redondeadas (2026-09-02, a
  * pedido del usuario): ademas del desglose exacto, cada dia expone la
@@ -113,6 +118,9 @@ class ReporteHorasRegistroService
 
     /** Hueco maximo (minutos) entre dos segmentos para considerarlos una marcacion doble accidental y fusionarlos. */
     private const UMBRAL_FUSION_MARCACIONES_MINUTOS = 2;
+
+    /** Minutos de margen que debe superar la salida despues del fin de almuerzo configurado para que se aplique el descuento (ver descontarAlmuerzo()). */
+    private const UMBRAL_MINIMO_ALMUERZO_MINUTOS = 30;
 
     /**
      * @return array<int, array{
@@ -169,10 +177,16 @@ class ReporteHorasRegistroService
             $inicioNocturno = $config ? $this->normalizar($config['hora_inicio_recargo_nocturno']) : '21:00:00';
             $finNocturno = $config ? $this->normalizar($config['hora_fin_recargo_nocturno']) : '06:00:00';
 
-            // Igual que en el motor legal: solo se aplica cuando el dia
-            // tiene un unico segmento (no se marco aparte para almorzar).
-            if (in_array($estado, self::ESTADOS_CON_HORAS, true) && count($segmentos) === 1 && $config && !empty($config['almuerzo_activo'])) {
-                $segmentos = $this->descontarAlmuerzo($segmentos[0], $config);
+            // Igual que en el motor legal: se evalua CADA segmento por
+            // separado, no el dia completo (ver docblock de la clase y
+            // CalculoRecargosService::segmentosDelDia() para el caso real
+            // que motivo el cambio 2026-09-05).
+            if (in_array($estado, self::ESTADOS_CON_HORAS, true) && $config && !empty($config['almuerzo_activo'])) {
+                $segmentosConAlmuerzo = [];
+                foreach ($segmentos as $segmento) {
+                    $segmentosConAlmuerzo = array_merge($segmentosConAlmuerzo, $this->descontarAlmuerzo($segmento, $config));
+                }
+                $segmentos = $segmentosConAlmuerzo;
             }
 
             $esDomingoOFestivo = ($cursor->format('w') === '0') || isset($festivos[$fecha]);
@@ -444,7 +458,14 @@ class ReporteHorasRegistroService
     /**
      * Si el segmento cubre por completo la ventana de almuerzo configurada,
      * la recorta. Si no la cubre completa, no se toca (no se adivina un
-     * descuento parcial).
+     * descuento parcial). Ademas (2026-09-02, a pedido del usuario tras
+     * revisar contra registros reales) la salida debe quedar al menos
+     * UMBRAL_MINIMO_ALMUERZO_MINUTOS despues del fin de almuerzo
+     * configurado — quien sale justo cuando termina la ventana (o poco
+     * despues) probablemente no alcanzo a almorzar de verdad. El umbral es
+     * relativo a hora_fin_almuerzo (hoy 13:00 + 30 min = 13:30 efectivo),
+     * no una hora fija en codigo. Si SI se cumple, la ventana descontada
+     * sigue siendo exactamente la configurada, sin el margen extra.
      */
     private function descontarAlmuerzo(array $segmento, array $config): array
     {
@@ -453,7 +474,11 @@ class ReporteHorasRegistroService
         $inicio = $this->normalizar($segmento['hora_inicio']);
         $fin = $this->normalizar($segmento['hora_fin']);
 
-        if ($inicio > $inicioAlmuerzo || $fin < $finAlmuerzo) {
+        // "<=": la exclusion incluye la salida exacta al umbral (13:30 con
+        // la config por defecto), no solo antes — el descuento solo aplica
+        // si la salida queda ESTRICTAMENTE despues del umbral.
+        $finAlmuerzoConMargen = $this->sumarHoras($finAlmuerzo, self::UMBRAL_MINIMO_ALMUERZO_MINUTOS / 60);
+        if ($inicio > $inicioAlmuerzo || $fin <= $finAlmuerzoConMargen) {
             return [$segmento];
         }
 

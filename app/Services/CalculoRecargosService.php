@@ -55,18 +55,37 @@ use RuntimeException;
  * el dia que empieza y otro en el dia siguiente).
  *
  * Descuento automatico de almuerzo (configuracion_global.almuerzo_activo):
- * si un dia del horario base tiene UN SOLO bloque continuo (no turno
- * partido) y ese bloque cubre por completo la ventana de almuerzo
- * configurada, se resta esa ventana antes de dividir por recargo
- * nocturno/acumulado semanal. Si el dia YA viene partido en 2+ bloques, se
- * asume que el hueco entre ellos ya es el almuerzo (mecanismo existente,
- * sin cambios) y NO se aplica el descuento automatico, para no restarlo
- * dos veces.
+ * se evalua CADA bloque del dia por separado (no el dia completo); si un
+ * bloque cubre por completo la ventana de almuerzo configurada, se resta
+ * esa ventana de ESE bloque antes de dividir por recargo nocturno/
+ * acumulado semanal. Un turno partido "normal" alrededor del mediodia
+ * (ej. 08:00-12:00 y 13:00-17:00) no descuenta nada extra porque NINGUN
+ * bloque individual cubre la ventana completa por si solo (el hueco entre
+ * bloques ya cumple ese rol). Pero si un bloque especifico SI cubre la
+ * ventana completa (ej. un turno partido cuyo descanso llega mucho mas
+ * tarde, como 10:00-16:00 y 17:30-19:30 — el primer bloque no tiene NINGUN
+ * descanso interno), a ese bloque SI se le descuenta, sin importar cuantos
+ * otros bloques tenga el dia (corregido 2026-09-05, antes bastaba con que
+ * el dia tuviera 2+ bloques para no descontar nada).
+ *
+ * (2026-09-02, a pedido del usuario tras revisar contra registros reales)
+ * Ademas de cubrir la ventana completa, la salida debe quedar al menos
+ * UMBRAL_MINIMO_ALMUERZO_MINUTOS despues del fin de almuerzo configurado
+ * para que se aplique el descuento — quien sale justo cuando termina la
+ * ventana (o poco despues) probablemente no alcanzo a almorzar de verdad,
+ * solo curso de largo hasta la salida. El umbral es relativo a
+ * hora_fin_almuerzo (hoy 13:00 + 30 min = 13:30 efectivo), no una hora
+ * fija en codigo, para que se ajuste solo si esa configuracion cambia. Si
+ * SI se cumple el umbral, la ventana descontada sigue siendo exactamente
+ * la configurada (no se descuenta el margen de los 30 min extra).
  */
 class CalculoRecargosService
 {
     private const CATEGORIAS_SUSPENSIVAS = ['permiso', 'vacaciones', 'incapacidad', 'ausencia', 'descanso_compensatorio'];
     private const CATEGORIAS_ADITIVAS = ['hora_extra', 'festivo_trabajado'];
+
+    /** Minutos de margen que debe superar la salida despues del fin de almuerzo configurado para que se aplique el descuento (ver docblock de la clase). */
+    private const UMBRAL_MINIMO_ALMUERZO_MINUTOS = 30;
 
     /** Memoiza, dentro de una misma llamada, cuantos domingos/festivos trabajo un empleado en un mes (empleadoId:AAAA-MM => int). */
     private array $cacheDiasTrabajadosPorMes = [];
@@ -226,11 +245,24 @@ class CalculoRecargosService
                 ];
             }
 
-            // Solo se aplica a un dia SIN turno partido (un unico bloque):
-            // si ya viene partido en 2+ bloques, el hueco entre ellos ya
-            // cumple el rol de almuerzo y no hay que restar de nuevo.
-            if (count($segmentosHorario) === 1 && !empty($config['almuerzo_activo'])) {
-                $segmentosHorario = $this->descontarAlmuerzo($segmentosHorario[0], $config);
+            // Se evalua CADA bloque por separado (2026-09-05, corregido a
+            // pedido del usuario tras un caso real: un turno partido cuyo
+            // hueco entre bloques NO cae en horario de almuerzo, ej.
+            // 10:00-16:00 y 17:30-19:30 — antes, tener 2+ bloques ese dia
+            // bastaba para no descontar nada, asumiendo que el hueco entre
+            // ellos siempre era el almuerzo; eso es cierto para un turno
+            // partido normal alrededor del mediodia (ningun bloque cubre la
+            // ventana completa por separado, asi que ninguno se recorta),
+            // pero NO cuando un bloque individual (como el primero de este
+            // ejemplo) SI cubre la ventana completa por si solo — ese
+            // bloque especifico si debe descontar, sin importar cuantos
+            // otros bloques tenga el dia.
+            if (!empty($config['almuerzo_activo'])) {
+                $segmentosConAlmuerzo = [];
+                foreach ($segmentosHorario as $segmento) {
+                    $segmentosConAlmuerzo = array_merge($segmentosConAlmuerzo, $this->descontarAlmuerzo($segmento, $config));
+                }
+                $segmentosHorario = $segmentosConAlmuerzo;
             }
 
             $segmentos = array_merge($segmentos, $segmentosHorario);
@@ -269,7 +301,11 @@ class CalculoRecargosService
         $inicio = $this->normalizar($segmento['hora_inicio']);
         $fin = $this->normalizar($segmento['hora_fin']);
 
-        if ($inicio > $inicioAlmuerzo || $fin < $finAlmuerzo) {
+        // "<=": la exclusion incluye la salida exacta al umbral (13:30 con
+        // la config por defecto), no solo antes — el descuento solo aplica
+        // si la salida queda ESTRICTAMENTE despues del umbral.
+        $finAlmuerzoConMargen = $this->sumarMinutos($finAlmuerzo, self::UMBRAL_MINIMO_ALMUERZO_MINUTOS);
+        if ($inicio > $inicioAlmuerzo || $fin <= $finAlmuerzoConMargen) {
             return [$segmento];
         }
 
@@ -420,6 +456,15 @@ class CalculoRecargosService
     private function normalizar(string $hora): string
     {
         return strlen($hora) === 5 ? $hora . ':00' : $hora;
+    }
+
+    /** Suma minutos enteros a una hora "HH:MM:SS", sin pasar del final del mismo dia calendario. */
+    private function sumarMinutos(string $hora, int $minutos): string
+    {
+        [$h, $m, $s] = array_map('intval', explode(':', $hora));
+        $segundos = ($h * 3600 + $m * 60 + $s) + ($minutos * 60);
+        $segundos = min($segundos, 23 * 3600 + 59 * 60 + 59);
+        return sprintf('%02d:%02d:%02d', intdiv($segundos, 3600), intdiv($segundos % 3600, 60), $segundos % 60);
     }
 
     private function horasEntre(string $ini, string $fin): float

@@ -132,6 +132,9 @@ $sitio = ConfiguracionSitioModel::obtener();
             <?php if ($flash = Session::getFlash('error')): ?>
                 <div class="alert alert-error"><?= View::e($flash) ?></div>
             <?php endif; ?>
+            <?php if ($flash = Session::getFlash('warning')): ?>
+                <div class="alert alert-warning"><?= View::e($flash) ?></div>
+            <?php endif; ?>
 
             <?= $content ?>
         </div>

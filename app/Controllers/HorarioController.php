@@ -14,6 +14,17 @@ class HorarioController
 {
     private const DIAS = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miercoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sabado', 0 => 'Domingo'];
 
+    /**
+     * Horas continuas de un solo bloque a partir de las cuales se advierte
+     * que no tiene ningun descanso interno (2026-09-05, a pedido del
+     * usuario tras revisar un horario real de 6h continuas sin almuerzo).
+     * Es solo una ADVERTENCIA informativa al guardar, no bloquea nada: la
+     * decision final sigue siendo de quien programa el horario. Ver
+     * Art. 167 CST — la jornada debe dividirse en secciones con un
+     * descanso intermedio para comer, que no se computa dentro de ella.
+     */
+    private const UMBRAL_BLOQUE_SIN_DESCANSO_HORAS = 6;
+
     public function index(Request $request): string
     {
         $empleadoId = (int) $request->param('empleadoId');
@@ -56,6 +67,7 @@ class HorarioController
         HorarioBaseModel::crearVigencia($empleadoId, $vigenteDesde, $vigenteHasta, $comentario, $dias);
 
         Session::flash('success', 'Horario base creado correctamente.');
+        $this->flashAdvertenciaBloquesLargos($dias);
         Response::redirect("/empleados/{$empleadoId}/horarios");
     }
 
@@ -99,7 +111,54 @@ class HorarioController
         HorarioBaseModel::actualizarVigencia($empleadoId, $vigenteDesde, $vigenteHasta, $comentario, $dias);
 
         Session::flash('success', 'Vigencia de horario actualizada.');
+        $this->flashAdvertenciaBloquesLargos($dias);
         Response::redirect("/empleados/{$empleadoId}/horarios");
+    }
+
+    /**
+     * Si algun bloque individual (de cualquier dia) supera
+     * UMBRAL_BLOQUE_SIN_DESCANSO_HORAS horas continuas, deja una
+     * advertencia (no bloqueante) explicando cual dia/bloque y cuantas
+     * horas — no reemplaza el flash de exito, se agrega aparte.
+     *
+     * @param array<int, array<int, array{hora_inicio:string, hora_fin:string}>> $dias
+     */
+    private function flashAdvertenciaBloquesLargos(array $dias): void
+    {
+        $avisos = [];
+        foreach ($dias as $diaSemana => $bloques) {
+            foreach ($bloques as $bloque) {
+                $horas = $this->horasEntre($bloque['hora_inicio'], $bloque['hora_fin']);
+                if ($horas >= self::UMBRAL_BLOQUE_SIN_DESCANSO_HORAS) {
+                    $nombreDia = self::DIAS[$diaSemana] ?? "dia {$diaSemana}";
+                    $avisos[] = sprintf(
+                        '%s: bloque de %s a %s (%.1f horas continuas, sin ningun descanso interno).',
+                        $nombreDia,
+                        substr($bloque['hora_inicio'], 0, 5),
+                        substr($bloque['hora_fin'], 0, 5),
+                        $horas
+                    );
+                }
+            }
+        }
+
+        if (empty($avisos)) {
+            return;
+        }
+
+        $mensaje = "Atencion: hay bloques de " . self::UMBRAL_BLOQUE_SIN_DESCANSO_HORAS . " horas continuas o mas, sin ningun descanso interno (Art. 167 CST exige dividir la jornada con un descanso intermedio para comer). Revisa si corresponde agregar un descanso:\n"
+            . implode("\n", $avisos);
+        Session::flash('warning', $mensaje);
+    }
+
+    /** Igual que en los servicios de calculo: horas entre dos "HH:MM" o "HH:MM:SS". */
+    private function horasEntre(string $ini, string $fin): float
+    {
+        $ini = strlen($ini) === 5 ? $ini . ':00' : $ini;
+        $fin = strlen($fin) === 5 ? $fin . ':00' : $fin;
+        [$h1, $m1, $s1] = array_map('intval', explode(':', $ini));
+        [$h2, $m2, $s2] = array_map('intval', explode(':', $fin));
+        return (($h2 * 3600 + $m2 * 60 + $s2) - ($h1 * 3600 + $m1 * 60 + $s1)) / 3600;
     }
 
     /** @return array<int, array<int, array{hora_inicio:string, hora_fin:string}>> */
