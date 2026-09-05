@@ -11,6 +11,7 @@ use App\Core\View;
 use App\Models\EmpleadoModel;
 use App\Models\NovedadModel;
 use App\Models\TipoNovedadModel;
+use App\Services\AlcanceAreasService;
 
 class NovedadController
 {
@@ -20,16 +21,13 @@ class NovedadController
     {
         $usuario = Auth::usuario();
         $rol = $usuario['rol_nombre'] ?? '';
-        $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
 
         if ($rol === 'Empleado') {
+            $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
             $novedades = $empleadoPropio ? NovedadModel::deEmpleado((int) $empleadoPropio['id']) : [];
-        } elseif (!Auth::veTodasLasAreas() && $empleadoPropio) {
-            $equipo = $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
-            $ids = array_map(fn ($e) => (int) $e['id'], $equipo);
-            $novedades = NovedadModel::deEmpleados($ids);
         } else {
-            $novedades = NovedadModel::todas();
+            $ids = AlcanceAreasService::empleadoIdsPermitidos();
+            $novedades = $ids === null ? NovedadModel::todas() : NovedadModel::deEmpleados($ids);
         }
 
         return View::render('novedades/index', [
@@ -44,15 +42,12 @@ class NovedadController
         $rol = $usuario['rol_nombre'] ?? '';
         $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
 
-        // Empleado solo puede crear novedades para si mismo; quien no ve todas las areas
-        // solo puede elegir entre los empleados de su propia area; el resto elige entre todos.
-        if ($rol === 'Empleado') {
-            $empleados = $empleadoPropio ? [$empleadoPropio] : [];
-        } elseif (!Auth::veTodasLasAreas() && $empleadoPropio) {
-            $empleados = $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
-        } else {
-            $empleados = EmpleadoModel::todosConSupervisor();
-        }
+        // Empleado solo puede crear novedades para si mismo; el resto elige
+        // entre los empleados en su alcance (propia area + adicionales, o
+        // todos si ve todas las areas).
+        $empleados = $rol === 'Empleado'
+            ? ($empleadoPropio ? [$empleadoPropio] : [])
+            : AlcanceAreasService::empleadosPermitidos();
 
         return View::render('novedades/form', [
             'empleados' => $empleados,
@@ -209,15 +204,12 @@ class NovedadController
         if (!$novedad) {
             return false;
         }
-        if (Auth::veTodasLasAreas()) {
+
+        $areaIds = AlcanceAreasService::areaIdsPermitidos();
+        if ($areaIds === null) {
             return true;
         }
 
-        $empleadoPropio = EmpleadoModel::porUsuario((int) Auth::id());
-        if (!$empleadoPropio || !$empleadoPropio['area_id']) {
-            return false;
-        }
-
-        return (int) $novedad['area_id'] === (int) $empleadoPropio['area_id'];
+        return $novedad['area_id'] !== null && in_array((int) $novedad['area_id'], $areaIds, true);
     }
 }

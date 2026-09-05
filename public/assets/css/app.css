@@ -209,6 +209,12 @@ tbody tr:hover { background: #fafafa; }
 
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; margin-bottom: 0.3rem; font-size: 0.85rem; font-weight: 600; color: var(--color-text-muted); }
+/* Un checkbox/radio NUNCA debe estirarse al 100% del ancho — sin esto,
+   la regla de abajo (pensada para inputs de texto) infla el area
+   clicable/visual de cualquier checkbox dentro de un .form-group, y en
+   una lista de checkboxes uno debajo del otro el cuadro termina lejos
+   de su propia etiqueta (ver incidente 2026-09-05, areas adicionales). */
+.form-group input[type="checkbox"], .form-group input[type="radio"] { width: auto; }
 .form-group input, .form-group select, .form-group textarea {
     width: 100%;
     padding: 0.5rem 0.65rem;

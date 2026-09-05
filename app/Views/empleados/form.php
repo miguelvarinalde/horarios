@@ -51,6 +51,30 @@
             </div>
         </div>
 
+        <?php if ($empleado && !empty($empleado['usuario_id'])): ?>
+            <div class="form-group">
+                <label>Correo de la cuenta de acceso</label>
+                <input type="email" name="email" required value="<?= View::e($usuarioEmail ?? '') ?>">
+                <small class="text-muted">Correo con el que este usuario inicia sesion. Cambialo aqui si se equivoco al digitarlo o si la persona cambio de correo.</small>
+            </div>
+
+            <div class="form-group">
+                <label>Areas adicionales que puede supervisar</label>
+                <div style="max-height:12rem;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;padding:.5rem .75rem">
+                    <?php if (empty($areas)): ?>
+                        <span class="text-muted">No hay areas activas creadas.</span>
+                    <?php endif; ?>
+                    <?php foreach ($areas as $a): ?>
+                        <label style="display:flex;align-items:center;gap:.5rem;font-weight:normal;padding:.2rem 0">
+                            <input type="checkbox" name="areas_adicionales[]" value="<?= (int) $a['id'] ?>" <?= in_array((int) $a['id'], $areaIdsAdicionales, true) ? 'checked' : '' ?>>
+                            <?= View::e($a['nombre']) ?>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+                <small class="text-muted">Ademas de su propia area (arriba), este usuario vera/gestionara tambien estas areas — util cuando un mismo supervisor cubre varios departamentos. Solo aplica si no tiene el permiso "Ver todas las areas" (ese permiso ya le da acceso a todo).</small>
+            </div>
+        <?php endif; ?>
+
         <?php if ($empleado): ?>
             <div class="form-group">
                 <label><input type="checkbox" name="activo" value="1" <?= $empleado['activo'] ? 'checked' : '' ?>> Empleado activo</label>

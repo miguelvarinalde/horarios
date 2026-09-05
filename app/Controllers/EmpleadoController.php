@@ -2,7 +2,6 @@
 
 namespace App\Controllers;
 
-use App\Core\Auth;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Session;
@@ -10,22 +9,15 @@ use App\Core\View;
 use App\Models\AreaModel;
 use App\Models\EmpleadoModel;
 use App\Models\RolModel;
+use App\Models\SupervisorAreaModel;
 use App\Models\UsuarioModel;
+use App\Services\AlcanceAreasService;
 
 class EmpleadoController
 {
     public function index(Request $request): string
     {
-        $empleados = EmpleadoModel::todosConSupervisor();
-
-        if (!Auth::veTodasLasAreas()) {
-            $empleadoPropio = EmpleadoModel::porUsuario((int) Auth::id());
-            $miArea = $empleadoPropio['area_id'] ?? null;
-            $empleados = array_values(array_filter(
-                $empleados,
-                fn ($e) => $miArea && (int) ($e['area_id'] ?? 0) === (int) $miArea
-            ));
-        }
+        $empleados = AlcanceAreasService::empleadosPermitidos();
 
         return View::render('empleados/index', [
             'empleados' => $empleados,
@@ -100,11 +92,15 @@ class EmpleadoController
             Response::abort(404, 'Empleado no encontrado');
         }
 
+        $usuarioVinculado = $empleado['usuario_id'] ? UsuarioModel::find((int) $empleado['usuario_id']) : null;
+
         return View::render('empleados/form', [
             'empleado' => $empleado,
             'supervisores' => array_filter(EmpleadoModel::posiblesSupervisores(), fn ($s) => $s['id'] != $id),
             'areas' => AreaModel::activas(),
             'roles' => RolModel::all('nombre ASC'),
+            'areaIdsAdicionales' => $usuarioVinculado ? SupervisorAreaModel::areaIdsDe((int) $usuarioVinculado['id']) : [],
+            'usuarioEmail' => $usuarioVinculado['email'] ?? null,
         ]);
     }
 
@@ -116,6 +112,7 @@ class EmpleadoController
         }
 
         $id = (int) $request->param('id');
+        $empleado = EmpleadoModel::find($id);
 
         EmpleadoModel::update($id, [
             'nombre' => trim((string) $request->input('nombre')),
@@ -126,6 +123,31 @@ class EmpleadoController
             'area_id' => $request->input('area_id') ?: null,
             'activo' => $request->input('activo') ? 1 : 0,
         ]);
+
+        if ($empleado && $empleado['usuario_id']) {
+            $usuarioId = (int) $empleado['usuario_id'];
+
+            // Areas adicionales que puede supervisar (2026-09-05, ademas de
+            // su propia area de arriba).
+            $areaIds = array_map('intval', (array) $request->input('areas_adicionales', []));
+            SupervisorAreaModel::sincronizar($usuarioId, $areaIds);
+
+            // Correo de la cuenta de acceso (2026-09-05, antes no habia
+            // forma de corregirlo desde esta pantalla si el empleado
+            // cambiaba de correo o se habia digitado mal al crearlo).
+            $nuevoEmail = trim((string) $request->input('email', ''));
+            if ($nuevoEmail !== '') {
+                try {
+                    UsuarioModel::update($usuarioId, ['email' => $nuevoEmail]);
+                } catch (\PDOException $e) {
+                    // Codigo 23000 = violacion de restriccion unica (el
+                    // correo ya esta en uso por otra cuenta).
+                    Session::flash('error', 'El empleado se actualizo, pero el correo no se pudo cambiar: "' . $nuevoEmail . '" ya esta en uso por otra cuenta.');
+                    Response::redirect("/empleados/{$id}/editar");
+                    return;
+                }
+            }
+        }
 
         Session::flash('success', 'Empleado actualizado correctamente.');
         Response::redirect('/empleados');

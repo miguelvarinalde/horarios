@@ -10,6 +10,7 @@ use App\Core\View;
 use App\Models\EmpleadoModel;
 use App\Models\RegistroTiempoModel;
 use App\Models\UsuarioModel;
+use App\Services\AlcanceAreasService;
 use DateTime;
 use Exception;
 
@@ -138,14 +139,7 @@ class RegistroTiempoController
     /** Listado para RRHH/Supervisor/Auditor. */
     public function index(Request $request): string
     {
-        $usuario = Auth::usuario();
-        $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
-
-        $empleadoIds = null; // null = sin restriccion (ve todos)
-        if (!Auth::veTodasLasAreas() && $empleadoPropio) {
-            $equipo = $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
-            $empleadoIds = array_map(fn ($e) => (int) $e['id'], $equipo);
-        }
+        $empleadoIds = AlcanceAreasService::empleadoIdsPermitidos(); // null = sin restriccion (ve todos)
 
         $desde = $request->query('desde') ?: null;
         $hasta = $request->query('hasta') ?: null;

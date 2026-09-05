@@ -8,6 +8,7 @@ use App\Core\View;
 use App\Models\EmpleadoModel;
 use App\Models\HorarioBaseModel;
 use App\Models\NovedadModel;
+use App\Services\AlcanceAreasService;
 use DateTimeImmutable;
 
 class CalendarioController
@@ -21,14 +22,14 @@ class CalendarioController
 
         $usuario = Auth::usuario();
         $rol = $usuario['rol_nombre'] ?? '';
-        $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
 
         if ($rol === 'Empleado') {
+            $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
             $empleados = $empleadoPropio ? [$empleadoPropio] : [];
-        } elseif (!Auth::veTodasLasAreas() && $empleadoPropio) {
-            $empleados = $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
-        } else {
+        } elseif (Auth::veTodasLasAreas()) {
             $empleados = array_filter(EmpleadoModel::todosConSupervisor(), fn ($e) => $e['activo']);
+        } else {
+            $empleados = AlcanceAreasService::empleadosPermitidos();
         }
 
         $datos = [];

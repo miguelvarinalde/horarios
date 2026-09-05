@@ -2,13 +2,13 @@
 
 namespace App\Controllers;
 
-use App\Core\Auth;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Session;
 use App\Core\View;
 use App\Models\EmpleadoModel;
 use App\Models\HorarioBaseModel;
+use App\Services\AlcanceAreasService;
 
 class HorarioController
 {
@@ -215,12 +215,9 @@ class HorarioController
             Response::abort(404, 'Empleado no encontrado');
         }
 
-        if (!Auth::veTodasLasAreas()) {
-            $empleadoPropio = EmpleadoModel::porUsuario((int) Auth::id());
-            $mismaArea = $empleadoPropio && $empleado['area_id'] && (int) $empleado['area_id'] === (int) ($empleadoPropio['area_id'] ?? 0);
-            if (!$mismaArea) {
-                Response::abort(403, 'No tienes permiso para gestionar el horario de este empleado (no pertenece a tu area).');
-            }
+        $idsPermitidos = AlcanceAreasService::empleadoIdsPermitidos();
+        if ($idsPermitidos !== null && !in_array($empleadoId, $idsPermitidos, true)) {
+            Response::abort(403, 'No tienes permiso para gestionar el horario de este empleado (no pertenece a tu area).');
         }
 
         return $empleado;

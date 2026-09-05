@@ -31,6 +31,23 @@ class EmpleadoModel extends Model
         return $stmt->fetchAll();
     }
 
+    /**
+     * Igual que delArea() pero para varias areas a la vez (alcance de un
+     * supervisor con areas adicionales — ver AlcanceAreasService).
+     *
+     * @param int[] $areaIds
+     */
+    public static function deLasAreas(array $areaIds): array
+    {
+        if (empty($areaIds)) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($areaIds), '?'));
+        $stmt = static::db()->prepare("SELECT * FROM empleados WHERE area_id IN ({$placeholders}) ORDER BY nombre");
+        $stmt->execute(array_values($areaIds));
+        return $stmt->fetchAll();
+    }
+
     public static function porUsuario(int $usuarioId): ?array
     {
         $stmt = static::db()->prepare('SELECT * FROM empleados WHERE usuario_id = ? LIMIT 1');

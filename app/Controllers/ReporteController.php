@@ -10,6 +10,7 @@ use App\Core\View;
 use App\Models\CalculoDetalleModel;
 use App\Models\EmpleadoModel;
 use App\Models\PeriodoCalculoModel;
+use App\Services\AlcanceAreasService;
 use App\Services\CalculoRecargosService;
 use App\Services\ReporteExportService;
 use App\Services\ReporteHorasRegistroService;
@@ -44,7 +45,7 @@ class ReporteController
             $periodos = PeriodoCalculoModel::all(); // puede haberse creado uno nuevo
         }
 
-        $empleadoIdsPermitidos = $this->empleadoIdsPermitidos();
+        $empleadoIdsPermitidos = AlcanceAreasService::empleadoIdsPermitidos();
 
         [$filas, $columnas, $periodo] = $periodoId ? $this->construirResumen($periodoId, $empleadoIdsPermitidos) : [[], [], null];
 
@@ -62,32 +63,6 @@ class ReporteController
             'puedeEliminarPeriodos' => $puedeEliminarPeriodos,
             'periodosConConteo' => $puedeEliminarPeriodos ? PeriodoCalculoModel::todosConConteoCalculos() : [],
         ]);
-    }
-
-    /**
-     * Alcance de empleados segun el rol en sesion: quien no tiene el
-     * permiso equipos.ver_todas (tipicamente Supervisor) solo ve su propia
-     * area (mas el mismo, si no tiene area asignada); Administrador/RRHH/
-     * Auditor no tienen restriccion. null = sin restriccion.
-     *
-     * @return int[]|null
-     */
-    private function empleadoIdsPermitidos(): ?array
-    {
-        if (Auth::veTodasLasAreas()) {
-            return null;
-        }
-
-        $empleadoPropio = EmpleadoModel::porUsuario((int) Auth::id());
-        if (!$empleadoPropio) {
-            return [];
-        }
-        if (!$empleadoPropio['area_id']) {
-            return [(int) $empleadoPropio['id']];
-        }
-
-        $equipo = EmpleadoModel::delArea((int) $empleadoPropio['area_id']);
-        return array_map(fn ($e) => (int) $e['id'], $equipo);
     }
 
     /**
@@ -201,14 +176,12 @@ class ReporteController
     {
         $usuario = Auth::usuario();
         $rol = $usuario['rol_nombre'] ?? '';
-        $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
 
         if ($rol === 'Empleado') {
+            $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
             $empleados = $empleadoPropio ? [$empleadoPropio] : [];
-        } elseif (!Auth::veTodasLasAreas() && $empleadoPropio) {
-            $empleados = $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
         } else {
-            $empleados = EmpleadoModel::todosConSupervisor();
+            $empleados = AlcanceAreasService::empleadosPermitidos();
         }
 
         $porId = [];
@@ -300,22 +273,14 @@ class ReporteController
 
     /**
      * Empleados en el alcance del usuario en sesion para este reporte:
-     * quien no tiene equipos.ver_todas solo ve su propia area (o solo a si
-     * mismo, si no tiene area asignada); RRHH/Administrador/Auditor ven a
-     * todos (ya validado por reportes.ver en la ruta).
+     * quien no tiene equipos.ver_todas solo ve su propia area mas
+     * cualquier area adicional que supervise (o solo a si mismo, si no
+     * tiene area asignada ni adicionales); RRHH/Administrador/Auditor ven
+     * a todos (ya validado por reportes.ver en la ruta).
      */
     private function empleadosEnAlcanceNominaRegistro(): array
     {
-        if (Auth::veTodasLasAreas()) {
-            return EmpleadoModel::todosConSupervisor();
-        }
-
-        $empleadoPropio = EmpleadoModel::porUsuario((int) Auth::id());
-        if (!$empleadoPropio) {
-            return [];
-        }
-
-        return $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
+        return AlcanceAreasService::empleadosPermitidos();
     }
 
     /**
@@ -436,7 +401,7 @@ class ReporteController
         }
 
         $periodoId = (int) $request->input('periodo_id');
-        $empleadoIdsPermitidos = $this->empleadoIdsPermitidos();
+        $empleadoIdsPermitidos = AlcanceAreasService::empleadoIdsPermitidos();
         (new CalculoRecargosService())->calcularPeriodoTodosLosEmpleados($periodoId, $empleadoIdsPermitidos);
 
         $mensaje = $empleadoIdsPermitidos === null
@@ -449,14 +414,14 @@ class ReporteController
     public function exportarExcel(Request $request)
     {
         $periodoId = (int) $request->query('periodo_id');
-        [$filas, $columnas, $periodo] = $this->construirResumen($periodoId, $this->empleadoIdsPermitidos());
+        [$filas, $columnas, $periodo] = $this->construirResumen($periodoId, AlcanceAreasService::empleadoIdsPermitidos());
         (new ReporteExportService())->generarExcel($filas, $columnas, $periodo['nombre'] ?? "periodo_{$periodoId}");
     }
 
     public function exportarPdf(Request $request)
     {
         $periodoId = (int) $request->query('periodo_id');
-        [$filas, $columnas, $periodo] = $this->construirResumen($periodoId, $this->empleadoIdsPermitidos());
+        [$filas, $columnas, $periodo] = $this->construirResumen($periodoId, AlcanceAreasService::empleadoIdsPermitidos());
         (new ReporteExportService())->generarPdf($filas, $columnas, $periodo['nombre'] ?? "periodo_{$periodoId}");
     }
 

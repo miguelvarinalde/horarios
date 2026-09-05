@@ -8,7 +8,7 @@ use App\Core\Response;
 use App\Core\Session;
 use App\Core\View;
 use App\Models\DiaCompensatorioModel;
-use App\Models\EmpleadoModel;
+use App\Services\AlcanceAreasService;
 
 class DiaCompensatorioController
 {
@@ -16,14 +16,7 @@ class DiaCompensatorioController
 
     public function index(Request $request): string
     {
-        $usuario = Auth::usuario();
-        $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
-
-        $empleadoIds = null;
-        if (!Auth::veTodasLasAreas() && $empleadoPropio) {
-            $equipo = $empleadoPropio['area_id'] ? EmpleadoModel::delArea((int) $empleadoPropio['area_id']) : [$empleadoPropio];
-            $empleadoIds = array_map(fn ($e) => (int) $e['id'], $equipo);
-        }
+        $empleadoIds = AlcanceAreasService::empleadoIdsPermitidos();
 
         $desde = $request->query('desde') ?: null;
         $hasta = $request->query('hasta') ?: null;
