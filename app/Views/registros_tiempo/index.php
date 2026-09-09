@@ -1,4 +1,14 @@
-<?php use App\Core\Auth; use App\Core\Session; use App\Core\View; ?>
+<?php
+use App\Core\Auth;
+use App\Core\Session;
+use App\Core\View;
+
+// Por debajo de esto, la precision del GPS/red del dispositivo es tan mala
+// (cientos/miles de metros) que la marcacion "capturada" no sirve para
+// verificar el lugar real — se avisa en vez de mostrarla igual que una
+// lectura confiable (mismo umbral que marcar-tiempo.js, 2026-09-08).
+$precisionBajaDesde = 150;
+?>
 <div class="card">
     <h2>Registros de entrada y salida</h2>
 
@@ -27,7 +37,16 @@
                 <td><?= View::e($r['empleado_nombre']) ?></td>
                 <td><?= $r['tipo'] === 'entrada' ? '<span class="badge badge-aprobado">Entrada</span>' : '<span class="badge badge-pendiente">Salida</span>' ?></td>
                 <td><?= View::e($r['fecha_hora']) ?></td>
-                <td><?= $r['precision_metros'] !== null ? '&plusmn;' . round((float) $r['precision_metros']) . 'm' : '-' ?></td>
+                <td>
+                    <?php if ($r['precision_metros'] !== null): ?>
+                        &plusmn;<?= round((float) $r['precision_metros']) ?>m
+                        <?php if ((float) $r['precision_metros'] > $precisionBajaDesde): ?>
+                            <span class="badge badge-pendiente" title="Probablemente no representa el lugar real de la marcacion (ubicacion aproximada por wifi/antenas en vez de un GPS con buena senal).">Baja precision</span>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        -
+                    <?php endif; ?>
+                </td>
                 <td>
                     <?php if ($r['ubicacion_estado'] === 'capturada' && $r['latitud'] !== null): ?>
                         <a href="https://www.google.com/maps?q=<?= View::e((string) $r['latitud']) ?>,<?= View::e((string) $r['longitud']) ?>" target="_blank" rel="noopener">Ver mapa</a>

@@ -1,4 +1,10 @@
-<?php use App\Core\Session; use App\Core\View; ?>
+<?php
+use App\Core\Session;
+use App\Core\View;
+
+// Mismo umbral que registros_tiempo/index.php y marcar-tiempo.js.
+$precisionBajaDesde = 150;
+?>
 
 <?php if (!$empleado): ?>
     <div class="card">
@@ -65,6 +71,9 @@
                             <a href="https://www.google.com/maps?q=<?= View::e((string) $r['latitud']) ?>,<?= View::e((string) $r['longitud']) ?>" target="_blank" rel="noopener">
                                 Ver mapa (&plusmn;<?= round((float) $r['precision_metros']) ?>m)
                             </a>
+                            <?php if ((float) $r['precision_metros'] > $precisionBajaDesde): ?>
+                                <span class="badge badge-pendiente" title="Probablemente no representa el lugar real de la marcacion.">Baja precision</span>
+                            <?php endif; ?>
                         <?php else: ?>
                             <span class="text-muted">Sin ubicacion (<?= View::e($r['ubicacion_estado']) ?>)</span>
                         <?php endif; ?>
