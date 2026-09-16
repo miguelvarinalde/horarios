@@ -6,6 +6,7 @@ use App\Controllers\ActualizacionController;
 use App\Controllers\AdminConfigController;
 use App\Controllers\AuthController;
 use App\Controllers\CalendarioController;
+use App\Controllers\CalendarioMs365ConfigController;
 use App\Controllers\CambiarPasswordController;
 use App\Controllers\DashboardController;
 use App\Controllers\DiaCompensatorioController;
@@ -153,6 +154,11 @@ $router->post('/admin/tipos-novedad/{id:\d+}/alternar', [AdminConfigController::
 // --- Administracion: Microsoft 365 (SSO) ---
 $router->get('/admin/ms365', [Ms365ConfigController::class, 'mostrar'], [[RbacMiddleware::class, 'admin.ms365']]);
 $router->post('/admin/ms365', [Ms365ConfigController::class, 'guardar'], [[RbacMiddleware::class, 'admin.ms365']]);
+
+// --- Administracion: Calendario Microsoft 365 ---
+$router->get('/admin/calendario-ms365', [CalendarioMs365ConfigController::class, 'mostrar'], [[RbacMiddleware::class, 'admin.calendario_ms365']]);
+$router->post('/admin/calendario-ms365', [CalendarioMs365ConfigController::class, 'guardar'], [[RbacMiddleware::class, 'admin.calendario_ms365']]);
+$router->post('/admin/calendario-ms365/reintentar/{id:\d+}', [CalendarioMs365ConfigController::class, 'reintentar'], [[RbacMiddleware::class, 'admin.calendario_ms365']]);
 
 // --- Administracion: roles y permisos ---
 $router->get('/admin/areas', [AdminConfigController::class, 'mostrarAreas'], [[RbacMiddleware::class, 'admin.areas']]);
