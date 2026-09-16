@@ -246,6 +246,28 @@ class CalendarioMs365ServiceTest extends TestCase
         $this->assertSame('sincronizado', EventoCalendarioMs365Model::porNovedad($novedadId)['estado']);
     }
 
+    public function test_sincronizarVigencia_guarda_un_ms_event_id_largo_sin_truncarlo(): void
+    {
+        // IDs reales de Microsoft Graph no tienen longitud maxima documentada
+        // y son comunmente de 150-500+ caracteres; ms_event_id debe poder
+        // almacenar uno completo sin truncarse (regresion: columna era
+        // VARCHAR(150)).
+        $idLargo = 'AAMkAGZmMDk5-' . str_repeat('x', 200) . '-idlargo';
+        $this->assertGreaterThan(200, strlen($idLargo));
+
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-idlargo@example.test');
+        $this->asignarHorario($empleadoId, [
+            ['dia_semana' => 1, 'bloques' => [['08:00', '17:00']]],
+        ], '2026-01-01');
+        $this->cliente->siguienteIdForzado = $idLargo;
+
+        $this->service->sincronizarVigencia($empleadoId, '2026-01-01');
+
+        $filas = EventoCalendarioMs365Model::porVigencia($empleadoId, '2026-01-01');
+        $this->assertCount(1, $filas);
+        $this->assertSame($idLargo, $filas[0]['ms_event_id'], 'El ms_event_id guardado no debe truncarse respecto al devuelto por Graph');
+    }
+
     public function test_eliminarTodosLosEventosDelEmpleado_borra_horarios_y_novedades(): void
     {
         $empleadoId = $this->crearEmpleadoConCorreo('empleado-borrartodo@example.test');

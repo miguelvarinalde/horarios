@@ -28,6 +28,15 @@ class FakeGraphCalendarClient extends GraphCalendarClient
     /** @var array<string, true> event ids marcados para fallar en la proxima llamada */
     public array $fallarPara = [];
 
+    /**
+     * IDs reales de Microsoft Graph no tienen longitud maxima documentada y
+     * son comunmente de 150-500+ caracteres. Permite a una prueba forzar que
+     * el proximo crearEvento() devuelva un id largo especifico, en vez del
+     * id secuencial corto de siempre, sin romper las demas pruebas que
+     * dependen de la secuencia 'ev-fake-1', 'ev-fake-2', etc.
+     */
+    public ?string $siguienteIdForzado = null;
+
     public function __construct()
     {
         // No llama a parent::__construct(): evita construir un GenericProvider/Client reales innecesarios.
@@ -40,7 +49,12 @@ class FakeGraphCalendarClient extends GraphCalendarClient
 
     public function crearEvento(string $email, string $calendarId, array $payload): string
     {
-        $id = 'ev-fake-' . $this->siguienteId++;
+        if ($this->siguienteIdForzado !== null) {
+            $id = $this->siguienteIdForzado;
+            $this->siguienteIdForzado = null;
+        } else {
+            $id = 'ev-fake-' . $this->siguienteId++;
+        }
         if (isset($this->fallarPara[$id])) {
             throw new \RuntimeException('Fallo simulado creando evento');
         }

@@ -74,7 +74,7 @@ $sitio = ConfiguracionSitioModel::obtener();
                 <a href="/registros-tiempo" class="<?= $activoExacto('/registros-tiempo', '/registros-tiempo/marcar') ?>">Registros de entrada/salida</a>
             <?php endif; ?>
 
-            <?php if ($puede('admin.configuracion') || $puede('admin.roles') || $puede('admin.festivos') || $puede('admin.tipos_recargo') || $puede('admin.ms365') || $puede('admin.sitio') || $puede('admin.areas') || $esAdministrador): ?>
+            <?php if ($puede('admin.configuracion') || $puede('admin.roles') || $puede('admin.festivos') || $puede('admin.tipos_recargo') || $puede('admin.ms365') || $puede('admin.calendario_ms365') || $puede('admin.sitio') || $puede('admin.areas') || $esAdministrador): ?>
                 <div class="grupo">Administracion</div>
                 <?php if ($puede('admin.areas')): ?>
                     <a href="/admin/areas" class="<?= $activo('/admin/areas') ?>">Areas / equipos</a>
@@ -99,6 +99,9 @@ $sitio = ConfiguracionSitioModel::obtener();
                 <?php endif; ?>
                 <?php if ($puede('admin.ms365')): ?>
                     <a href="/admin/ms365" class="<?= $activo('/admin/ms365') ?>">Microsoft 365 (SSO)</a>
+                <?php endif; ?>
+                <?php if ($puede('admin.calendario_ms365')): ?>
+                    <a href="/admin/calendario-ms365" class="<?= $activo('/admin/calendario-ms365') ?>">Calendario Microsoft 365</a>
                 <?php endif; ?>
                 <?php if ($puede('admin.sitio')): ?>
                     <a href="/admin/sitio" class="<?= $activo('/admin/sitio') ?>">Personalizacion del sitio</a>

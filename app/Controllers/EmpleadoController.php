@@ -141,7 +141,22 @@ class EmpleadoController
             // Correo de la cuenta de acceso (2026-09-05, antes no habia
             // forma de corregirlo desde esta pantalla si el empleado
             // cambiaba de correo o se habia digitado mal al crearlo).
+            $usuarioActual = UsuarioModel::find($usuarioId);
+            $emailActual = $usuarioActual['email'] ?? '';
             $nuevoEmail = trim((string) $request->input('email', ''));
+            $emailCambio = $nuevoEmail !== '' && $nuevoEmail !== $emailActual;
+
+            if ($emailCambio && $sincronizarCalendarioAnterior) {
+                // El calendario ya estaba sincronizado contra el correo
+                // (buzon) ANTERIOR: hay que limpiar sus eventos antes de
+                // que el correo apunte a otro buzon, o quedarian eventos
+                // huerfanos que la app ya no puede administrar.
+                try {
+                    (new CalendarioMs365Service())->eliminarTodosLosEventosDelEmpleado($id);
+                } catch (\Throwable $e) {
+                }
+            }
+
             if ($nuevoEmail !== '') {
                 try {
                     UsuarioModel::update($usuarioId, ['email' => $nuevoEmail]);
@@ -154,7 +169,7 @@ class EmpleadoController
                 }
             }
 
-            if ($sincronizarCalendarioNuevo && !$sincronizarCalendarioAnterior) {
+            if ($sincronizarCalendarioNuevo && (!$sincronizarCalendarioAnterior || $emailCambio)) {
                 try {
                     $servicio = new CalendarioMs365Service();
                     foreach (HorarioBaseModel::vigenciasVigentesHoy($id) as $vigenteDesde) {
