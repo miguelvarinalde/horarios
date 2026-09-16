@@ -154,4 +154,64 @@ class CalendarioMs365ServiceTest extends TestCase
         $this->assertCount(2, $this->cliente->eventosEliminados);
         $this->assertEmpty(EventoCalendarioMs365Model::porVigencia($empleadoId, '2026-01-01'));
     }
+
+    public function test_sincronizarNovedad_dia_completo_crea_un_evento_de_dia_completo(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-novedad1@example.test');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'VACACIONES', '2026-02-10');
+
+        $this->service->sincronizarNovedad($novedadId);
+
+        $this->assertCount(1, $this->cliente->eventosCreados);
+        $this->assertTrue($this->cliente->eventosCreados[0]['payload']['isAllDay']);
+        $fila = \App\Models\EventoCalendarioMs365Model::porNovedad($novedadId);
+        $this->assertSame('sincronizado', $fila['estado']);
+    }
+
+    public function test_sincronizarNovedad_parcial_crea_un_evento_con_hora(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-novedad2@example.test');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'PERMISO_REMUNERADO', '2026-02-11', '11:00:00', '16:30:00');
+
+        $this->service->sincronizarNovedad($novedadId);
+
+        $payload = $this->cliente->eventosCreados[0]['payload'];
+        $this->assertArrayNotHasKey('isAllDay', $payload);
+        $this->assertStringContainsString('11:00:00', $payload['start']['dateTime']);
+        $this->assertStringContainsString('16:30:00', $payload['end']['dateTime']);
+    }
+
+    public function test_sincronizarNovedad_llamada_dos_veces_actualiza_en_vez_de_duplicar(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-novedad3@example.test');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'VACACIONES', '2026-02-12');
+
+        $this->service->sincronizarNovedad($novedadId);
+        $this->service->sincronizarNovedad($novedadId);
+
+        $this->assertCount(1, $this->cliente->eventosCreados);
+        $this->assertCount(1, $this->cliente->eventosActualizados);
+    }
+
+    public function test_eliminarNovedad_borra_el_evento_y_la_fila_si_existia(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-novedad4@example.test');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'VACACIONES', '2026-02-13');
+        $this->service->sincronizarNovedad($novedadId);
+
+        $this->service->eliminarNovedad($novedadId);
+
+        $this->assertCount(1, $this->cliente->eventosEliminados);
+        $this->assertNull(\App\Models\EventoCalendarioMs365Model::porNovedad($novedadId));
+    }
+
+    public function test_eliminarNovedad_no_hace_nada_si_nunca_se_habia_sincronizado(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-novedad5@example.test');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'VACACIONES', '2026-02-14');
+
+        $this->service->eliminarNovedad($novedadId);
+
+        $this->assertEmpty($this->cliente->eventosEliminados);
+    }
 }

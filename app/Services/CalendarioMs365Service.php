@@ -6,6 +6,7 @@ use App\Models\ConfiguracionCalendarioMs365Model;
 use App\Models\EmpleadoModel;
 use App\Models\EventoCalendarioMs365Model;
 use App\Models\HorarioBaseModel;
+use App\Models\NovedadModel;
 use App\Models\UsuarioModel;
 use DateTimeImmutable;
 use Throwable;
@@ -170,6 +171,110 @@ class CalendarioMs365Service
             }
             EventoCalendarioMs365Model::delete((int) $ev['id']);
         }
+    }
+
+    public function sincronizarNovedad(int $novedadId): void
+    {
+        if (!$this->activo()) {
+            return;
+        }
+        $novedad = NovedadModel::conDetalle($novedadId);
+        if (!$novedad) {
+            return;
+        }
+        $empleado = EmpleadoModel::find((int) $novedad['empleado_id']);
+        if (!$empleado || empty($empleado['sincronizar_calendario']) || empty($empleado['usuario_id'])) {
+            return;
+        }
+        $usuario = UsuarioModel::find((int) $empleado['usuario_id']);
+        if (!$usuario) {
+            return;
+        }
+        $email = $usuario['email'];
+
+        $calendarId = $this->calendarioDe((int) $empleado['id'], $email);
+        $existente = EventoCalendarioMs365Model::porNovedad($novedadId);
+        $payload = $this->payloadNovedad($novedad);
+
+        try {
+            if ($existente && $existente['ms_event_id']) {
+                $this->cliente()->actualizarEvento($email, $calendarId, $existente['ms_event_id'], $payload);
+                $eventId = $existente['ms_event_id'];
+            } else {
+                $eventId = $this->cliente()->crearEvento($email, $calendarId, $payload);
+            }
+            EventoCalendarioMs365Model::guardarNovedad([
+                'empleado_id' => (int) $empleado['id'],
+                'novedad_id' => $novedadId,
+                'ms_calendar_id' => $calendarId,
+                'ms_event_id' => $eventId,
+                'estado' => 'sincronizado',
+                'error_mensaje' => null,
+                'sincronizado_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (Throwable $e) {
+            EventoCalendarioMs365Model::guardarNovedad([
+                'empleado_id' => (int) $empleado['id'],
+                'novedad_id' => $novedadId,
+                'ms_calendar_id' => $calendarId,
+                'ms_event_id' => $existente['ms_event_id'] ?? null,
+                'estado' => 'error',
+                'error_mensaje' => substr($e->getMessage(), 0, 500),
+                'sincronizado_at' => null,
+            ]);
+        }
+    }
+
+    public function eliminarNovedad(int $novedadId): void
+    {
+        if (!$this->activo()) {
+            return;
+        }
+        $existente = EventoCalendarioMs365Model::porNovedad($novedadId);
+        if (!$existente) {
+            return;
+        }
+        $empleado = EmpleadoModel::find((int) $existente['empleado_id']);
+        if (!$empleado || empty($empleado['usuario_id'])) {
+            EventoCalendarioMs365Model::delete((int) $existente['id']);
+            return;
+        }
+        $usuario = UsuarioModel::find((int) $empleado['usuario_id']);
+        $email = $usuario['email'] ?? null;
+
+        if ($email && $existente['ms_event_id']) {
+            try {
+                $this->cliente()->eliminarEvento($email, $existente['ms_calendar_id'], $existente['ms_event_id']);
+            } catch (Throwable $e) {
+            }
+        }
+        EventoCalendarioMs365Model::delete((int) $existente['id']);
+    }
+
+    /** @param array{fecha:string, hora_inicio:?string, hora_fin:?string, comentario:?string, tipo_nombre:string} $novedad */
+    private function payloadNovedad(array $novedad): array
+    {
+        $descripcion = $novedad['comentario'] ?: 'Sin comentario adicional.';
+
+        if (empty($novedad['hora_inicio']) || empty($novedad['hora_fin'])) {
+            $fin = (new DateTimeImmutable($novedad['fecha']))->modify('+1 day')->format('Y-m-d');
+            return [
+                'subject' => $novedad['tipo_nombre'],
+                'body' => ['contentType' => 'text', 'content' => $descripcion],
+                'start' => ['dateTime' => $novedad['fecha'] . 'T00:00:00', 'timeZone' => 'America/Bogota'],
+                'end' => ['dateTime' => $fin . 'T00:00:00', 'timeZone' => 'America/Bogota'],
+                'isAllDay' => true,
+                'isReminderOn' => false,
+            ];
+        }
+
+        return [
+            'subject' => $novedad['tipo_nombre'],
+            'body' => ['contentType' => 'text', 'content' => $descripcion],
+            'start' => ['dateTime' => $novedad['fecha'] . 'T' . $this->normalizarHora($novedad['hora_inicio']), 'timeZone' => 'America/Bogota'],
+            'end' => ['dateTime' => $novedad['fecha'] . 'T' . $this->normalizarHora($novedad['hora_fin']), 'timeZone' => 'America/Bogota'],
+            'isReminderOn' => false,
+        ];
     }
 
     /** Reutiliza el calendario ya creado para este empleado (cualquier fila existente); si no hay ninguna, se lo pide a Graph. */
