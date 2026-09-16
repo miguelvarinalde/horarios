@@ -12,6 +12,7 @@ use App\Models\EmpleadoModel;
 use App\Models\NovedadModel;
 use App\Models\TipoNovedadModel;
 use App\Services\AlcanceAreasService;
+use App\Services\CalendarioMs365Service;
 
 class NovedadController
 {
@@ -170,6 +171,12 @@ class NovedadController
             return;
         }
         NovedadModel::aprobar($id, (int) Auth::id());
+
+        try {
+            (new CalendarioMs365Service())->sincronizarNovedad($id);
+        } catch (\Throwable $e) {
+        }
+
         Session::flash('success', 'Novedad aprobada.');
         Response::redirect('/novedades');
     }
@@ -186,6 +193,12 @@ class NovedadController
             return;
         }
         NovedadModel::rechazar($id, (int) Auth::id());
+
+        try {
+            (new CalendarioMs365Service())->eliminarNovedad($id);
+        } catch (\Throwable $e) {
+        }
+
         Session::flash('success', 'Novedad rechazada.');
         Response::redirect('/novedades');
     }
