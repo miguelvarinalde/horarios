@@ -8,10 +8,12 @@ use App\Core\Session;
 use App\Core\View;
 use App\Models\AreaModel;
 use App\Models\EmpleadoModel;
+use App\Models\HorarioBaseModel;
 use App\Models\RolModel;
 use App\Models\SupervisorAreaModel;
 use App\Models\UsuarioModel;
 use App\Services\AlcanceAreasService;
+use App\Services\CalendarioMs365Service;
 
 class EmpleadoController
 {
@@ -114,6 +116,9 @@ class EmpleadoController
         $id = (int) $request->param('id');
         $empleado = EmpleadoModel::find($id);
 
+        $sincronizarCalendarioAnterior = (bool) ($empleado['sincronizar_calendario'] ?? false);
+        $sincronizarCalendarioNuevo = (bool) $request->input('sincronizar_calendario');
+
         EmpleadoModel::update($id, [
             'nombre' => trim((string) $request->input('nombre')),
             'documento' => trim((string) $request->input('documento')),
@@ -122,6 +127,7 @@ class EmpleadoController
             'supervisor_id' => $request->input('supervisor_id') ?: null,
             'area_id' => $request->input('area_id') ?: null,
             'activo' => $request->input('activo') ? 1 : 0,
+            'sincronizar_calendario' => $sincronizarCalendarioNuevo ? 1 : 0,
         ]);
 
         if ($empleado && $empleado['usuario_id']) {
@@ -145,6 +151,21 @@ class EmpleadoController
                     Session::flash('error', 'El empleado se actualizo, pero el correo no se pudo cambiar: "' . $nuevoEmail . '" ya esta en uso por otra cuenta.');
                     Response::redirect("/empleados/{$id}/editar");
                     return;
+                }
+            }
+
+            if ($sincronizarCalendarioNuevo && !$sincronizarCalendarioAnterior) {
+                try {
+                    $servicio = new CalendarioMs365Service();
+                    foreach (HorarioBaseModel::vigenciasVigentesHoy($id) as $vigenteDesde) {
+                        $servicio->sincronizarVigencia($id, $vigenteDesde);
+                    }
+                } catch (\Throwable $e) {
+                }
+            } elseif (!$sincronizarCalendarioNuevo && $sincronizarCalendarioAnterior) {
+                try {
+                    (new CalendarioMs365Service())->eliminarTodosLosEventosDelEmpleado($id);
+                } catch (\Throwable $e) {
                 }
             }
         }

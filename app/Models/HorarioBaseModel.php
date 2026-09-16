@@ -120,6 +120,18 @@ class HorarioBaseModel
         return array_values(array_filter($rows, fn ($r) => $r['id'] === $horarioBaseIdMasReciente));
     }
 
+    /** @return string[] las fechas vigente_desde (unicas) de las vigencias activas hoy para este empleado, sin importar el dia de la semana. */
+    public static function vigenciasVigentesHoy(int $empleadoId): array
+    {
+        $hoy = date('Y-m-d');
+        $stmt = self::db()->prepare(
+            'SELECT DISTINCT vigente_desde FROM horarios_base
+             WHERE empleado_id = ? AND vigente_desde <= ? AND (vigente_hasta IS NULL OR vigente_hasta >= ?)'
+        );
+        $stmt->execute([$empleadoId, $hoy, $hoy]);
+        return $stmt->fetchAll(\PDO::FETCH_COLUMN);
+    }
+
     public static function eliminarVigencia(int $empleadoId, string $vigenteDesde): void
     {
         $stmt = self::db()->prepare('DELETE FROM horarios_base WHERE empleado_id = ? AND vigente_desde = ?');

@@ -59,6 +59,11 @@
             </div>
 
             <div class="form-group">
+                <label><input type="checkbox" name="sincronizar_calendario" value="1" <?= !empty($empleado['sincronizar_calendario']) ? 'checked' : '' ?>> Sincronizar con calendario de Outlook</label>
+                <small class="text-muted">Crea/actualiza automaticamente los turnos y novedades aprobadas de este empleado en un calendario "Horario de trabajo" en su Outlook. Requiere que la integracion este configurada y activa en <a href="/admin/calendario-ms365">Calendario Microsoft 365</a>.</small>
+            </div>
+
+            <div class="form-group">
                 <label>Areas adicionales que puede supervisar</label>
                 <div style="max-height:12rem;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;padding:.5rem .75rem">
                     <?php if (empty($areas)): ?>
