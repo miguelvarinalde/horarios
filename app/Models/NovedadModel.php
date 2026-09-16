@@ -62,6 +62,26 @@ class NovedadModel extends Model
         return $stmt->fetchAll();
     }
 
+    /**
+     * Todas las novedades de un empleado (cualquier estado) que caen dentro
+     * de un rango de fechas, para informes de auditoria (ej. "Horas
+     * trabajadas segun registro") que necesitan mostrar si hubo un permiso
+     * solicitado ese dia y su motivo, sin importar si fue aprobado,
+     * rechazado o sigue pendiente.
+     */
+    public static function deEmpleadoEnRango(int $empleadoId, string $desde, string $hasta): array
+    {
+        $stmt = static::db()->prepare(
+            "SELECT n.*, tn.categoria, tn.nombre AS tipo_nombre
+             FROM novedades n
+             JOIN tipos_novedad tn ON tn.id = n.tipo_novedad_id
+             WHERE n.empleado_id = ? AND n.fecha BETWEEN ? AND ?
+             ORDER BY n.fecha, n.id"
+        );
+        $stmt->execute([$empleadoId, $desde, $hasta]);
+        return $stmt->fetchAll();
+    }
+
     public static function aprobar(int $id, int $usuarioId): void
     {
         $stmt = static::db()->prepare(

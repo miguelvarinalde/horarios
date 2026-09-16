@@ -10,6 +10,29 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 class ReporteExportService
 {
     /**
+     * Resume en una sola celda de texto las novedades (cualquier estado) de
+     * un dia, para la columna "Permiso / Novedad" del Excel de horas segun
+     * registro: tipo, estado, horario si es parcial, y el comentario/motivo.
+     *
+     * @param array<int, array{tipo_nombre:string, estado:string, hora_inicio:?string, hora_fin:?string, comentario:?string}> $novedadesDelDia
+     */
+    private function formatearNovedadesDelDia(array $novedadesDelDia): string
+    {
+        $partes = [];
+        foreach ($novedadesDelDia as $n) {
+            $texto = $n['tipo_nombre'] . ' (' . ucfirst($n['estado']) . ')';
+            if (!empty($n['hora_inicio']) && !empty($n['hora_fin'])) {
+                $texto .= ' ' . substr($n['hora_inicio'], 0, 5) . '-' . substr($n['hora_fin'], 0, 5);
+            }
+            if (!empty($n['comentario'])) {
+                $texto .= ': ' . $n['comentario'];
+            }
+            $partes[] = $texto;
+        }
+        return implode(' | ', $partes);
+    }
+
+    /**
      * @param array<int, array{empleado_nombre:string, recargos: array<string,float>, total_horas: float}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en orden
      */
@@ -54,7 +77,7 @@ class ReporteExportService
      * Informe dia por dia de un solo empleado (Horas trabajadas segun registro), con una
      * columna independiente por cada tipo de recargo que aparezca en el rango.
      *
-     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
+     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, novedades:array, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en el orden en que deben mostrarse
      * @param array<string,string> $nombresPorCodigo codigo => nombre completo del tipo de recargo
      */
@@ -72,6 +95,7 @@ class ReporteExportService
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Entrada redondeada');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida redondeada');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Permiso / Novedad');
         foreach ($columnas as $codigo) {
             $sheet->setCellValueByColumnAndRow($col++, 1, $nombresPorCodigo[$codigo] ?? $codigo);
             $sheet->setCellValueByColumnAndRow($col++, 1, ($nombresPorCodigo[$codigo] ?? $codigo) . ' (redondeado)');
@@ -97,6 +121,7 @@ class ReporteExportService
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['primera_entrada_redondeada'] ? substr($dia['primera_entrada_redondeada'], 0, 5) : '');
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['ultima_salida'] ? substr($dia['ultima_salida'], 0, 5) : '');
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['ultima_salida_redondeada'] ? substr($dia['ultima_salida_redondeada'], 0, 5) : '');
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $this->formatearNovedadesDelDia($dia['novedades'] ?? []));
             foreach ($columnas as $codigo) {
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos'][$codigo] ?? 0);
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos_redondeados'][$codigo] ?? 0);

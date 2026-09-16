@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Core\Database;
 use App\Models\ConfiguracionGlobalModel;
 use App\Models\HorarioBaseModel;
+use App\Models\NovedadModel;
 use App\Models\RegistroTiempoModel;
 use App\Models\TipoRecargoModel;
 use DateTimeImmutable;
@@ -50,8 +51,18 @@ use DateTimeImmutable;
  * la medianoche) lo cierre automaticamente si de verdad se le olvido. La
  * regla de cierre (ver calcularSalidaAutomatica()) es, en orden de
  * prioridad:
- *  1. Si el empleado tiene horario_base programado ese dia, la salida es
- *     la hora de fin de su ultimo bloque programado ese dia.
+ *  0. Si el empleado tiene una novedad APROBADA ese dia (permiso,
+ *     incapacidad, vacaciones, ausencia o descanso compensatorio) con hora
+ *     de inicio propia (no de dia completo) que comienza en o despues de
+ *     esa ultima entrada, la salida es la hora de inicio de esa novedad —
+ *     ver el docblock de calcularSalidaAutomatica() para el caso real
+ *     (2026-09-16) que motivo esta regla: un empleado marco entrada y tenia
+ *     un permiso aprobado para ausentarse el resto del dia, y el cierre
+ *     automatico le estaba contando esas horas como trabajadas por no
+ *     conocer el permiso.
+ *  1. Si no aplica lo anterior y el empleado tiene horario_base programado
+ *     ese dia, la salida es la hora de fin de su ultimo bloque programado
+ *     ese dia.
  *  2. Si no hay horario programado y esa entrada es la UNICA marcacion del
  *     dia (jornada continua), se asumen 8h desde la entrada, o 7h si la
  *     entrada fue a las 13:00 o despues.
@@ -62,6 +73,12 @@ use DateTimeImmutable;
  * registros_tiempo ni en ninguna otra tabla), esta regla aplica igual de
  * automatico a dias pasados que ya estaban incompletos en produccion,
  * sin necesidad de un backfill aparte.
+ *
+ * Ademas, cada dia del informe expone la lista de novedades (cualquier
+ * estado: aprobada, pendiente o rechazada) que el empleado tenga registradas
+ * esa fecha, con su tipo, comentario/motivo y horario si es parcial — para
+ * que el reporte de auditoria muestre si hubo un permiso de por medio y por
+ * que, no solo el numero de horas (ver NovedadModel::deEmpleadoEnRango()).
  *
  * Fusion de marcaciones casi seguidas (2026-08-31, caso real encontrado en
  * produccion: entrada 06:51, salida 06:52, entrada 06:52, salida 15:22).
@@ -116,6 +133,15 @@ class ReporteHorasRegistroService
      */
     private const ESTADOS_CON_HORAS = ['completo', 'cerrado_automatico', 'en_curso'];
 
+    /**
+     * Categorias de novedad que representan una ausencia autorizada (a
+     * diferencia de 'hora_extra'/'festivo_trabajado', que suman tiempo en
+     * vez de explicarlo) — mismo criterio que CalculoRecargosService, para
+     * que el cierre automatico solo considere una novedad aprobada como
+     * explicacion de una salida sin marcar.
+     */
+    private const CATEGORIAS_DE_AUSENCIA = ['permiso', 'vacaciones', 'incapacidad', 'ausencia', 'descanso_compensatorio'];
+
     /** Hueco maximo (minutos) entre dos segmentos para considerarlos una marcacion doble accidental y fusionarlos. */
     private const UMBRAL_FUSION_MARCACIONES_MINUTOS = 2;
 
@@ -141,6 +167,7 @@ class ReporteHorasRegistroService
 
         $registros = RegistroTiempoModel::deEmpleadoEnRango($empleadoId, $inicioSemana, $finSemana);
         $porDia = $this->agruparPorDia($registros);
+        $novedadesPorDia = $this->agruparNovedadesPorDia(NovedadModel::deEmpleadoEnRango($empleadoId, $inicioSemana, $finSemana));
         $festivos = $this->festivosEnRango($inicioSemana, $finSemana);
 
         $resultado = [];
@@ -166,7 +193,8 @@ class ReporteHorasRegistroService
             }
 
             $marcacionesDelDia = $porDia[$fecha] ?? [];
-            [$segmentos, $estado, $nota] = $this->emparejarDia($empleadoId, $fecha, $marcacionesDelDia);
+            $novedadesDelDia = $novedadesPorDia[$fecha] ?? [];
+            [$segmentos, $estado, $nota] = $this->emparejarDia($empleadoId, $fecha, $marcacionesDelDia, $novedadesDelDia);
 
             if (in_array($estado, self::ESTADOS_CON_HORAS, true)) {
                 $segmentos = $this->fusionarMarcacionesCasiSeguidas($segmentos);
@@ -257,6 +285,11 @@ class ReporteHorasRegistroService
                 'estado' => $estado,
                 'nota' => $nota,
                 'marcaciones' => $marcacionesDelDia,
+                // Novedades (cualquier estado) registradas ese dia, para que
+                // el reporte muestre si hubo un permiso/incapacidad/etc de
+                // por medio y su motivo, sin importar si afecto o no las
+                // horas calculadas arriba (ver docblock de la clase).
+                'novedades' => $novedadesDelDia,
                 // Solo tiene sentido para 'cerrado_automatico': la hora de
                 // salida que se calculo, para mostrarla explicitamente en
                 // vez de que RRHH solo vea el total de horas sin saber a
@@ -289,6 +322,16 @@ class ReporteHorasRegistroService
         return $porDia;
     }
 
+    /** @return array<string, array> mapa fecha => lista de novedades (cualquier estado) de ese dia */
+    private function agruparNovedadesPorDia(array $novedades): array
+    {
+        $porDia = [];
+        foreach ($novedades as $n) {
+            $porDia[$n['fecha']][] = $n;
+        }
+        return $porDia;
+    }
+
     /**
      * Empareja entrada/salida dentro de un mismo dia. Si el dia no alterna
      * limpiamente entrada,salida,entrada,salida,... lo marca incompleto en
@@ -297,9 +340,10 @@ class ReporteHorasRegistroService
      * le olvido marcar salida"), en cuyo caso se cierra automaticamente
      * (ver calcularSalidaAutomatica() y el docblock de la clase).
      *
+     * @param array $novedadesDelDia novedades (cualquier estado) del empleado en esta fecha
      * @return array{0: array, 1: string, 2: ?string}
      */
-    private function emparejarDia(int $empleadoId, string $fecha, array $marcacionesDelDia): array
+    private function emparejarDia(int $empleadoId, string $fecha, array $marcacionesDelDia, array $novedadesDelDia = []): array
     {
         if (empty($marcacionesDelDia)) {
             return [[], 'sin_marcaciones', null];
@@ -350,7 +394,7 @@ class ReporteHorasRegistroService
         }
 
         $horaEntrada = substr($ultima['fecha_hora'], 11, 8);
-        [$horaSalidaCalculada, $nota] = $this->calcularSalidaAutomatica($empleadoId, $fecha, $horaEntrada, $segmentos);
+        [$horaSalidaCalculada, $nota] = $this->calcularSalidaAutomatica($empleadoId, $fecha, $horaEntrada, $segmentos, $novedadesDelDia);
 
         if ($horaSalidaCalculada > $horaEntrada) {
             $segmentos[] = ['hora_inicio' => $horaEntrada, 'hora_fin' => $horaSalidaCalculada];
@@ -369,11 +413,55 @@ class ReporteHorasRegistroService
      * (3) jornada fraccionada completada hasta 7h totales del dia. Ver el
      * docblock de la clase para el detalle completo de la regla.
      *
+     * Caso real que motivo la prioridad 0 (2026-09-16, produccion): un
+     * empleado marco entrada a las 06:42 y tenia un permiso remunerado
+     * APROBADO ese mismo dia de 11:00 a 16:30 (acompañamiento medico). Como
+     * no tiene horario_base configurado, el cierre automatico caia en la
+     * regla de "jornada continua" y le asumia 8h completas desde la
+     * entrada (salida estimada 14:42), contando como trabajadas casi 4h que
+     * en realidad estaban cubiertas por el permiso. Ahora, si existe una
+     * novedad aprobada de categoria CATEGORIAS_DE_AUSENCIA con hora_inicio
+     * propia (no de dia completo) que empiece en o despues de la ultima
+     * entrada sin marcar, se usa esa hora de inicio como cierre — es
+     * evidencia real de que el empleado dejo de trabajar en ese momento,
+     * mas confiable que cualquier horario asumido. Si hay varias, se toma
+     * la de hora_inicio mas temprana (la mas conservadora). Una novedad
+     * cuyo permiso ya haya terminado antes de la ultima entrada (o que sea
+     * de dia completo, sin hora_inicio) no aplica aqui: no explica por que
+     * dejo de marcar despues de esa entrada.
+     *
      * @param array $segmentosPrevios pares entrada/salida ya completos ese mismo dia
+     * @param array $novedadesDelDia novedades (cualquier estado) del empleado en esta fecha
      * @return array{0: string, 1: string} [hora de cierre calculada (HH:MM:SS), nota para el usuario]
      */
-    private function calcularSalidaAutomatica(int $empleadoId, string $fecha, string $horaEntrada, array $segmentosPrevios): array
+    private function calcularSalidaAutomatica(int $empleadoId, string $fecha, string $horaEntrada, array $segmentosPrevios, array $novedadesDelDia = []): array
     {
+        $inicioPermiso = null;
+        $permisoQueAplica = null;
+        foreach ($novedadesDelDia as $novedad) {
+            if (($novedad['estado'] ?? null) !== 'aprobado'
+                || empty($novedad['hora_inicio'])
+                || !in_array($novedad['categoria'], self::CATEGORIAS_DE_AUSENCIA, true)) {
+                continue;
+            }
+            $horaInicioNovedad = $this->normalizar($novedad['hora_inicio']);
+            if ($horaInicioNovedad < $horaEntrada) {
+                continue; // el permiso ya habia terminado (o empezado) antes de esta entrada: no explica la falta de salida
+            }
+            if ($inicioPermiso === null || $horaInicioNovedad < $inicioPermiso) {
+                $inicioPermiso = $horaInicioNovedad;
+                $permisoQueAplica = $novedad;
+            }
+        }
+
+        if ($inicioPermiso !== null) {
+            return [$inicioPermiso, sprintf(
+                'Cierre automatico: no marco salida. Tiene un permiso aprobado ("%s") desde las %s; se cerro la jornada en ese momento.',
+                $permisoQueAplica['tipo_nombre'],
+                substr($inicioPermiso, 0, 5)
+            )];
+        }
+
         $bloquesProgramados = HorarioBaseModel::vigenteEnFecha($empleadoId, $fecha);
         if (!empty($bloquesProgramados)) {
             $horaFinProgramada = $this->normalizar((string) max(array_column($bloquesProgramados, 'hora_fin')));

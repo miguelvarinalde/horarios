@@ -25,7 +25,9 @@ use RuntimeException;
  *  2. Por cada dia se construye una lista de "segmentos" de tiempo
  *     trabajado: los bloques del horario base (salvo que el dia este
  *     suspendido por un periodo no laborable o por una novedad de dia
- *     completo tipo permiso/vacaciones/incapacidad/ausencia) mas los
+ *     completo tipo permiso/vacaciones/incapacidad/ausencia; y con la
+ *     porcion cubierta por un permiso/incapacidad/etc. PARCIAL aprobado ese
+ *     dia recortada de los bloques, ver restarVentanaDeSegmentos()) mas los
  *     bloques adicionales que vengan de novedades de categoria
  *     'hora_extra' o 'festivo_trabajado'.
  *  3. Cada segmento se divide en sub-segmentos diurno/nocturno segun la
@@ -245,6 +247,26 @@ class CalculoRecargosService
                 ];
             }
 
+            // Recorta del horario programado la porcion cubierta por un
+            // permiso/incapacidad/etc. PARCIAL aprobado ese dia (2026-09-16,
+            // a diferencia de tieneNovedadSuspensivaDeDiaCompleto(), que solo
+            // suspende el dia entero cuando la novedad NO tiene hora_inicio
+            // propia). Antes, una novedad suspensiva con hora_inicio/hora_fin
+            // (ej. "permiso de 14:00 a 17:00") no restaba nada de los bloques
+            // del horario_base: el empleado seguia apareciendo pagado por
+            // esas horas en la nomina legal aunque tuviera un permiso
+            // aprobado exactamente para ausentarse en ese rango. Se recorta
+            // ANTES del descuento de almuerzo (no despues) porque, si el
+            // permiso ya cubre la ventana de almuerzo, no tiene sentido
+            // evaluar un descuento de almuerzo aparte sobre un tiempo que ya
+            // quedo excluido por el permiso.
+            foreach ($novedadesDelDia as $novedad) {
+                if (in_array($novedad['categoria'], self::CATEGORIAS_SUSPENSIVAS, true)
+                    && !empty($novedad['hora_inicio']) && !empty($novedad['hora_fin'])) {
+                    $segmentosHorario = $this->restarVentanaDeSegmentos($segmentosHorario, $novedad['hora_inicio'], $novedad['hora_fin']);
+                }
+            }
+
             // Se evalua CADA bloque por separado (2026-09-05, corregido a
             // pedido del usuario tras un caso real: un turno partido cuyo
             // hueco entre bloques NO cae en horario de almuerzo, ej.
@@ -283,6 +305,46 @@ class CalculoRecargosService
         usort($segmentos, fn ($a, $b) => strcmp($a['hora_inicio'], $b['hora_inicio']));
 
         return $segmentos;
+    }
+
+    /**
+     * Resta una ventana de tiempo (ej. un permiso parcial aprobado) de una
+     * lista de segmentos ya construida, recortando cualquier solapamiento —
+     * a diferencia de descontarAlmuerzo(), aqui SI se recorta un
+     * solapamiento parcial (el permiso excluye exactamente el tiempo que
+     * cubre, sin exigir que cubra el segmento completo). Un segmento sin
+     * solapamiento con la ventana queda intacto; uno totalmente cubierto por
+     * la ventana desaparece; uno parcialmente cubierto deja 0, 1 o 2
+     * sub-segmentos (antes/despues de la ventana), preservando su
+     * novedad_id/extra_forzado original.
+     *
+     * @param array<int, array{hora_inicio:string, hora_fin:string, novedad_id:?int, extra_forzado:bool}> $segmentos
+     * @return array<int, array{hora_inicio:string, hora_fin:string, novedad_id:?int, extra_forzado:bool}>
+     */
+    private function restarVentanaDeSegmentos(array $segmentos, string $inicioVentana, string $finVentana): array
+    {
+        $inicioVentana = $this->normalizar($inicioVentana);
+        $finVentana = $this->normalizar($finVentana);
+
+        $resultado = [];
+        foreach ($segmentos as $segmento) {
+            $inicio = $this->normalizar($segmento['hora_inicio']);
+            $fin = $this->normalizar($segmento['hora_fin']);
+
+            if ($finVentana <= $inicio || $inicioVentana >= $fin) {
+                $resultado[] = $segmento; // sin solapamiento
+                continue;
+            }
+
+            if ($inicioVentana > $inicio) {
+                $resultado[] = ['hora_inicio' => $segmento['hora_inicio'], 'hora_fin' => $inicioVentana, 'novedad_id' => $segmento['novedad_id'], 'extra_forzado' => $segmento['extra_forzado']];
+            }
+            if ($finVentana < $fin) {
+                $resultado[] = ['hora_inicio' => $finVentana, 'hora_fin' => $segmento['hora_fin'], 'novedad_id' => $segmento['novedad_id'], 'extra_forzado' => $segmento['extra_forzado']];
+            }
+            // Si la ventana cubre el segmento por completo, no se agrega nada: el bloque queda totalmente excluido.
+        }
+        return $resultado;
     }
 
     /**

@@ -140,6 +140,39 @@ abstract class TestCase extends BaseTestCase
         return (int) $this->db->lastInsertId();
     }
 
+    /**
+     * Igual que crearNovedadAprobada, pero con el estado indicado
+     * ('pendiente' o 'rechazado') en vez de 'aprobado' — para probar que el
+     * cierre automatico de ReporteHorasRegistroService solo considera
+     * novedades ya aprobadas.
+     */
+    protected function crearNovedadConEstado(int $empleadoId, string $codigoTipo, string $fecha, string $estado, ?string $horaInicio = null, ?string $horaFin = null): int
+    {
+        $tipoId = (int) $this->db->query("SELECT id FROM tipos_novedad WHERE codigo = '{$codigoTipo}'")->fetchColumn();
+        if (!$tipoId) {
+            throw new \RuntimeException("No existe tipo_novedad con codigo {$codigoTipo}. ¿Se aplicaron los seeds?");
+        }
+
+        $usuarioId = $this->crearUsuarioDummy();
+
+        $stmt = $this->db->prepare(
+            "INSERT INTO novedades (empleado_id, tipo_novedad_id, fecha, hora_inicio, hora_fin, estado, creado_por)
+             VALUES (?, ?, ?, ?, ?, ?, ?)"
+        );
+        $stmt->execute([$empleadoId, $tipoId, $fecha, $horaInicio, $horaFin, $estado, $usuarioId]);
+        return (int) $this->db->lastInsertId();
+    }
+
+    /** Inserta una marcacion real de entrada/salida (registros_tiempo) para pruebas del informe basado en registro. */
+    protected function crearMarcacion(int $empleadoId, string $tipo, string $fechaHora): void
+    {
+        $stmt = $this->db->prepare(
+            "INSERT INTO registros_tiempo (empleado_id, tipo, fecha_hora, ubicacion_estado)
+             VALUES (?, ?, ?, 'no_disponible')"
+        );
+        $stmt->execute([$empleadoId, $tipo, $fechaHora]);
+    }
+
     protected function crearPeriodo(string $fechaInicio, string $fechaFin): int
     {
         $stmt = $this->db->prepare(

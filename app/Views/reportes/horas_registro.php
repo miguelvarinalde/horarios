@@ -47,6 +47,7 @@
                 <th>Marcaciones</th>
                 <th title="Primera entrada del dia. Debajo, redondeada al bloque de 30 min mas cercano.">Entrada</th>
                 <th title="Ultima salida del dia (o la estimada, si el dia se cerro automatico). Debajo, redondeada al bloque de 30 min mas cercano.">Salida</th>
+                <th title="Novedades (permisos, incapacidades, etc.) registradas ese dia, con su estado y motivo, sin importar si afectaron o no las horas calculadas.">Permiso / Novedad</th>
                 <?php foreach ($columnas as $c): ?>
                     <th title="<?= View::e($nombresPorCodigo[$c] ?? $c) ?>. Debajo, redondeado al bloque de 30 min mas cercano."><?= View::e($c) ?></th>
                 <?php endforeach; ?>
@@ -106,6 +107,30 @@
                             <span class="text-muted">&mdash;</span>
                         <?php endif; ?>
                     </td>
+                    <td>
+                        <?php if (empty($dia['novedades'])): ?>
+                            <span class="text-muted">&mdash;</span>
+                        <?php else: ?>
+                            <?php foreach ($dia['novedades'] as $n): ?>
+                                <?php
+                                    $claseBadge = match ($n['estado']) {
+                                        'aprobado' => 'badge-aprobado',
+                                        'rechazado' => 'badge-rechazado',
+                                        default => 'badge-pendiente',
+                                    };
+                                ?>
+                                <div style="margin-bottom:.3rem">
+                                    <span class="badge <?= $claseBadge ?>"><?= View::e($n['tipo_nombre']) ?> (<?= View::e(ucfirst($n['estado'])) ?>)</span>
+                                    <?php if (!empty($n['hora_inicio']) && !empty($n['hora_fin'])): ?>
+                                        <span class="text-muted" style="font-size:.85em"><?= substr($n['hora_inicio'], 0, 5) ?>-<?= substr($n['hora_fin'], 0, 5) ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($n['comentario'])): ?>
+                                        <br><span class="text-muted" style="font-size:.85em"><?= View::e($n['comentario']) ?></span>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </td>
                     <?php foreach ($columnas as $c): ?>
                         <td>
                             <?= isset($dia['recargos'][$c]) ? number_format($dia['recargos'][$c], 2) : '' ?>
@@ -119,7 +144,7 @@
                 </tr>
             <?php endforeach; ?>
             <?php if (empty($informe)): ?>
-                <tr><td colspan="<?= count($columnas) + 7 ?>" class="text-muted">Sin datos para el rango seleccionado.</td></tr>
+                <tr><td colspan="<?= count($columnas) + 8 ?>" class="text-muted">Sin datos para el rango seleccionado.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>

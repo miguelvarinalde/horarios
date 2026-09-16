@@ -108,6 +108,67 @@ class CalculoRecargosServiceTest extends TestCase
         $this->assertArrayNotHasKey('HEN', $lunes);
     }
 
+    public function test_permiso_parcial_aprobado_resta_del_horario_programado(): void
+    {
+        // Caso real que motivo esta correccion (2026-09-16): una novedad
+        // suspensiva (permiso/incapacidad/etc.) con hora_inicio/hora_fin
+        // propios no restaba nada del horario_base — solo una novedad de
+        // DIA COMPLETO (sin hora_inicio) suspendia el dia entero.
+        $semana = $this->obtenerSemana('2026-06-01');
+        $empleadoId = $this->crearEmpleado();
+        $this->crearConfiguracionGlobal($semana[1], 42.0);
+
+        $this->asignarHorario($empleadoId, [
+            ['dia_semana' => 1, 'bloques' => [['08:00', '17:00']]], // 9h programadas
+        ]);
+        $this->crearNovedadAprobada($empleadoId, 'PERMISO_REMUNERADO', $semana[1], '14:00:00', '17:00:00');
+
+        $periodoId = $this->crearPeriodo($semana[1], $semana[0]);
+        $this->service->calcularPeriodo($empleadoId, $periodoId);
+
+        $lunes = $this->horasPorTipoRecargo($empleadoId, $periodoId, $semana[1]);
+
+        $this->assertEqualsWithDelta(6.0, array_sum($lunes), 0.01, 'Debe contar solo 08:00-14:00 (9h - 3h de permiso), no las 9h completas del horario');
+    }
+
+    public function test_permiso_parcial_en_medio_del_bloque_lo_divide_en_dos(): void
+    {
+        $semana = $this->obtenerSemana('2026-06-01');
+        $empleadoId = $this->crearEmpleado();
+        $this->crearConfiguracionGlobal($semana[1], 42.0);
+
+        $this->asignarHorario($empleadoId, [
+            ['dia_semana' => 1, 'bloques' => [['08:00', '17:00']]], // 9h programadas
+        ]);
+        $this->crearNovedadAprobada($empleadoId, 'PERMISO_REMUNERADO', $semana[1], '10:00:00', '11:00:00');
+
+        $periodoId = $this->crearPeriodo($semana[1], $semana[0]);
+        $this->service->calcularPeriodo($empleadoId, $periodoId);
+
+        $lunes = $this->horasPorTipoRecargo($empleadoId, $periodoId, $semana[1]);
+
+        $this->assertEqualsWithDelta(8.0, array_sum($lunes), 0.01, 'El permiso de 1h en medio del bloque debe dividirlo en 08:00-10:00 + 11:00-17:00 = 8h, no 9h');
+    }
+
+    public function test_permiso_parcial_pendiente_no_afecta_el_horario_programado(): void
+    {
+        $semana = $this->obtenerSemana('2026-06-01');
+        $empleadoId = $this->crearEmpleado();
+        $this->crearConfiguracionGlobal($semana[1], 42.0);
+
+        $this->asignarHorario($empleadoId, [
+            ['dia_semana' => 1, 'bloques' => [['08:00', '17:00']]],
+        ]);
+        $this->crearNovedadConEstado($empleadoId, 'PERMISO_REMUNERADO', $semana[1], 'pendiente', '14:00:00', '17:00:00');
+
+        $periodoId = $this->crearPeriodo($semana[1], $semana[0]);
+        $this->service->calcularPeriodo($empleadoId, $periodoId);
+
+        $lunes = $this->horasPorTipoRecargo($empleadoId, $periodoId, $semana[1]);
+
+        $this->assertEqualsWithDelta(9.0, array_sum($lunes), 0.01, 'Un permiso solo pendiente (no aprobado) no debe restar nada del horario programado');
+    }
+
     public function test_recargo_dominical_festivo_ordinario(): void
     {
         $semana = $this->obtenerSemana('2026-06-01');
