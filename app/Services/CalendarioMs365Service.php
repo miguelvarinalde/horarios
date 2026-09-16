@@ -251,6 +251,48 @@ class CalendarioMs365Service
         EventoCalendarioMs365Model::delete((int) $existente['id']);
     }
 
+    /** Vuelve a intentar la sincronizacion completa de origen de una fila en error (toda la vigencia si es horario, la novedad si es novedad). */
+    public function reintentar(int $eventoCalendarioId): void
+    {
+        $evento = EventoCalendarioMs365Model::find($eventoCalendarioId);
+        if (!$evento) {
+            return;
+        }
+
+        if ($evento['novedad_id']) {
+            $this->sincronizarNovedad((int) $evento['novedad_id']);
+        } else {
+            $this->sincronizarVigencia((int) $evento['empleado_id'], $evento['horario_vigente_desde']);
+        }
+    }
+
+    /** Borra en Graph y localmente TODOS los eventos (horario y novedades) de un empleado — usado al apagar su interruptor. */
+    public function eliminarTodosLosEventosDelEmpleado(int $empleadoId): void
+    {
+        if (!$this->activo()) {
+            return;
+        }
+        $empleado = EmpleadoModel::find($empleadoId);
+        if (!$empleado || empty($empleado['usuario_id'])) {
+            return;
+        }
+        $usuario = UsuarioModel::find((int) $empleado['usuario_id']);
+        if (!$usuario) {
+            return;
+        }
+        $email = $usuario['email'];
+
+        foreach (EventoCalendarioMs365Model::porEmpleado($empleadoId) as $ev) {
+            if ($ev['ms_event_id']) {
+                try {
+                    $this->cliente()->eliminarEvento($email, $ev['ms_calendar_id'], $ev['ms_event_id']);
+                } catch (Throwable $e) {
+                }
+            }
+            EventoCalendarioMs365Model::delete((int) $ev['id']);
+        }
+    }
+
     /** @param array{fecha:string, hora_inicio:?string, hora_fin:?string, comentario:?string, tipo_nombre:string} $novedad */
     private function payloadNovedad(array $novedad): array
     {

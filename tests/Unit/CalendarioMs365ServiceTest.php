@@ -214,4 +214,49 @@ class CalendarioMs365ServiceTest extends TestCase
 
         $this->assertEmpty($this->cliente->eventosEliminados);
     }
+
+    public function test_reintentar_una_fila_de_horario_en_error_vuelve_a_sincronizar_toda_la_vigencia(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-reintento1@example.test');
+        $this->asignarHorario($empleadoId, [['dia_semana' => 1, 'bloques' => [['08:00', '17:00']]]], '2026-01-01');
+        $this->cliente->fallarPara['ev-fake-1'] = true;
+        $this->service->sincronizarVigencia($empleadoId, '2026-01-01');
+        $filaConError = EventoCalendarioMs365Model::porVigencia($empleadoId, '2026-01-01')[0];
+        $this->assertSame('error', $filaConError['estado']);
+
+        unset($this->cliente->fallarPara['ev-fake-1']);
+        $this->service->reintentar((int) $filaConError['id']);
+
+        $filaActualizada = EventoCalendarioMs365Model::porVigencia($empleadoId, '2026-01-01')[0];
+        $this->assertSame('sincronizado', $filaActualizada['estado']);
+    }
+
+    public function test_reintentar_una_fila_de_novedad_en_error_la_vuelve_a_sincronizar(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-reintento2@example.test');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'VACACIONES', '2026-02-20');
+        $this->cliente->fallarPara['ev-fake-1'] = true;
+        $this->service->sincronizarNovedad($novedadId);
+        $filaConError = EventoCalendarioMs365Model::porNovedad($novedadId);
+        $this->assertSame('error', $filaConError['estado']);
+
+        unset($this->cliente->fallarPara['ev-fake-1']);
+        $this->service->reintentar((int) $filaConError['id']);
+
+        $this->assertSame('sincronizado', EventoCalendarioMs365Model::porNovedad($novedadId)['estado']);
+    }
+
+    public function test_eliminarTodosLosEventosDelEmpleado_borra_horarios_y_novedades(): void
+    {
+        $empleadoId = $this->crearEmpleadoConCorreo('empleado-borrartodo@example.test');
+        $this->asignarHorario($empleadoId, [['dia_semana' => 1, 'bloques' => [['08:00', '17:00']]]], '2026-01-01');
+        $novedadId = $this->crearNovedadAprobada($empleadoId, 'VACACIONES', '2026-02-21');
+        $this->service->sincronizarVigencia($empleadoId, '2026-01-01');
+        $this->service->sincronizarNovedad($novedadId);
+
+        $this->service->eliminarTodosLosEventosDelEmpleado($empleadoId);
+
+        $this->assertCount(2, $this->cliente->eventosEliminados);
+        $this->assertEmpty(EventoCalendarioMs365Model::porEmpleado($empleadoId));
+    }
 }
