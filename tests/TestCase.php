@@ -77,6 +77,22 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
+     * Igual que crearEmpleado(), pero ademas crea y vincula una cuenta de
+     * usuario con el correo indicado — necesario para cualquier prueba de
+     * CalendarioMs365Service, que resuelve el correo del empleado a traves
+     * de usuario_id.
+     */
+    protected function crearEmpleadoConCorreo(string $email, bool $sincronizarCalendario = true): int
+    {
+        $empleadoId = $this->crearEmpleado();
+        $usuarioId = $this->crearUsuarioDummy();
+        $this->db->prepare('UPDATE usuarios SET email = ? WHERE id = ?')->execute([$email, $usuarioId]);
+        $this->db->prepare('UPDATE empleados SET usuario_id = ?, sincronizar_calendario = ? WHERE id = ?')
+            ->execute([$usuarioId, $sincronizarCalendario ? 1 : 0, $empleadoId]);
+        return $empleadoId;
+    }
+
+    /**
      * @param array<int, array{dia_semana:int, bloques: array<int, array{0:string,1:string}>}> $dias
      */
     protected function asignarHorario(int $empleadoId, array $dias, string $vigenteDesde = '2026-01-01'): void
