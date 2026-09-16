@@ -9,6 +9,7 @@ use App\Core\View;
 use App\Models\EmpleadoModel;
 use App\Models\HorarioBaseModel;
 use App\Services\AlcanceAreasService;
+use App\Services\CalendarioMs365Service;
 
 class HorarioController
 {
@@ -66,6 +67,13 @@ class HorarioController
 
         HorarioBaseModel::crearVigencia($empleadoId, $vigenteDesde, $vigenteHasta, $comentario, $dias);
 
+        try {
+            (new CalendarioMs365Service())->sincronizarVigencia($empleadoId, $vigenteDesde);
+        } catch (\Throwable $e) {
+            // La sincronizacion con Outlook nunca debe bloquear el guardado local; el error queda
+            // visible en /admin/calendario-ms365 para reintentar.
+        }
+
         Session::flash('success', 'Horario base creado correctamente.');
         $this->flashAdvertenciaBloquesLargos($dias);
         Response::redirect("/empleados/{$empleadoId}/horarios");
@@ -109,6 +117,11 @@ class HorarioController
         $dias = $this->leerDiasDelFormulario($request);
 
         HorarioBaseModel::actualizarVigencia($empleadoId, $vigenteDesde, $vigenteHasta, $comentario, $dias);
+
+        try {
+            (new CalendarioMs365Service())->sincronizarVigencia($empleadoId, $vigenteDesde);
+        } catch (\Throwable $e) {
+        }
 
         Session::flash('success', 'Vigencia de horario actualizada.');
         $this->flashAdvertenciaBloquesLargos($dias);
@@ -195,6 +208,11 @@ class HorarioController
         $vigenteDesde = $request->input('vigente_desde');
 
         HorarioBaseModel::eliminarVigencia($empleadoId, $vigenteDesde);
+
+        try {
+            (new CalendarioMs365Service())->eliminarVigencia($empleadoId, $vigenteDesde);
+        } catch (\Throwable $e) {
+        }
 
         Session::flash('success', 'Vigencia de horario eliminada.');
         Response::redirect("/empleados/{$empleadoId}/horarios");
