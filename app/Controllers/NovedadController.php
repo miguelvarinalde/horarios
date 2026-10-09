@@ -68,9 +68,21 @@ class NovedadController
         $rol = $usuario['rol_nombre'] ?? '';
         $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
 
-        $empleadoId = ($rol === 'Empleado' && $empleadoPropio)
-            ? (int) $empleadoPropio['id']
-            : (int) $request->input('empleado_id');
+        if (AlcanceAreasService::esAutoservicio()) {
+            // El Empleado solo registra novedades propias: si su usuario no
+            // tiene ficha vinculada no hay a quien atribuirselas (antes se
+            // tomaba el empleado_id del formulario, o sea, el de cualquiera).
+            if (!$empleadoPropio) {
+                Session::flash('error', 'Tu usuario no tiene un empleado asociado; no es posible registrar novedades.');
+                Response::redirect('/novedades');
+                return;
+            }
+            $empleadoId = (int) $empleadoPropio['id'];
+        } else {
+            // Existe y esta en el alcance del usuario (404 / 403 si no).
+            $empleadoId = (int) $request->input('empleado_id');
+            AlcanceAreasService::autorizarEmpleadoOAbortar($empleadoId, 'No puedes registrar novedades de un empleado que no pertenece a tu area.');
+        }
 
         $fechas = $this->resolverFechas(
             $request->input('fecha') ?: null,

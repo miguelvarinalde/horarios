@@ -38,8 +38,27 @@ class SecurityHeaders
         // pedir ubicacion al navegador; el resto de permisos sensibles se niegan.
         header('Permissions-Policy: geolocation=(self), camera=(), microphone=(), payment=(), usb=()');
 
-        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+        if (self::esHttps()) {
             header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
         }
+    }
+
+    /**
+     * Detras de Cloudflare/un proxy, $_SERVER['HTTPS'] puede llegar vacio
+     * aunque el visitante use https; en ese caso la cookie de sesion
+     * quedaba sin el atributo Secure y sin HSTS. Se considera https si el
+     * servidor lo dice, si el proxy lo informa, o si APP_URL es https.
+     */
+    public static function esHttps(): bool
+    {
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            return true;
+        }
+
+        if (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https') {
+            return true;
+        }
+
+        return str_starts_with(strtolower((string) ($_ENV['APP_URL'] ?? '')), 'https://');
     }
 }

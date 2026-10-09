@@ -27,10 +27,14 @@
                 <td><?= $u['ultimo_login_at'] ? View::e($u['ultimo_login_at']) : '<span class="text-muted">Nunca</span>' ?></td>
                 <td><?= $u['debe_cambiar_password'] ? '<span class="badge badge-pendiente">Si</span>' : '-' ?></td>
                 <td>
+                    <?php if (in_array((int) $u['id'], $idsGestionables, true)): ?>
                     <form method="post" action="/usuarios/<?= (int) $u['id'] ?>/resetear-password" data-confirm="¿Resetear la contrasena de <?= View::e($u['nombre']) ?>? La contrasena actual dejara de funcionar.">
                         <input type="hidden" name="_csrf" value="<?= View::e(Session::csrfToken()) ?>">
                         <button type="submit" class="btn btn-sm">Resetear contrasena</button>
                     </form>
+                    <?php else: ?>
+                        <span class="text-muted" title="Esta cuenta tiene permisos que tu rol no tiene; solo un rol con esos permisos puede reiniciarla.">No disponible</span>
+                    <?php endif; ?>
                 </td>
             </tr>
         <?php endforeach; ?>

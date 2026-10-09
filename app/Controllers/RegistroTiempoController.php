@@ -157,7 +157,8 @@ class RegistroTiempoController
     {
         return View::render('registros_tiempo/form', [
             'registro' => null,
-            'empleados' => EmpleadoModel::todosConSupervisor(),
+            // Solo los empleados del alcance del usuario (antes: todos).
+            'empleados' => AlcanceAreasService::empleadosPermitidos(),
         ]);
     }
 
@@ -167,6 +168,10 @@ class RegistroTiempoController
             Response::abort(419, 'Formulario expirado, intenta de nuevo.');
             return;
         }
+
+        // Existe y esta en el alcance del usuario (404 / 403 si no).
+        $empleadoId = (int) $request->input('empleado_id');
+        AlcanceAreasService::autorizarEmpleadoOAbortar($empleadoId, 'No puedes agregar marcaciones a un empleado que no pertenece a tu area.');
 
         [$fechaHora, $error] = $this->combinarFechaHora($request->input('fecha'), $request->input('hora'));
         $comentario = trim((string) $request->input('comentario'));
@@ -182,7 +187,7 @@ class RegistroTiempoController
         }
 
         RegistroTiempoModel::insert([
-            'empleado_id' => (int) $request->input('empleado_id'),
+            'empleado_id' => $empleadoId,
             'tipo' => $request->input('tipo') === 'salida' ? 'salida' : 'entrada',
             'fecha_hora' => $fechaHora,
             'fecha_hora_cliente' => null,
@@ -205,6 +210,7 @@ class RegistroTiempoController
         if (!$registro) {
             Response::abort(404, 'Marcacion no encontrada.');
         }
+        AlcanceAreasService::autorizarEmpleadoOAbortar((int) $registro['empleado_id'], 'No puedes corregir marcaciones de un empleado que no pertenece a tu area.');
 
         return View::render('registros_tiempo/form', [
             'registro' => $registro,
@@ -220,9 +226,11 @@ class RegistroTiempoController
         }
 
         $id = (int) $request->param('id');
-        if (!RegistroTiempoModel::find($id)) {
+        $registro = RegistroTiempoModel::find($id);
+        if (!$registro) {
             Response::abort(404, 'Marcacion no encontrada.');
         }
+        AlcanceAreasService::autorizarEmpleadoOAbortar((int) $registro['empleado_id'], 'No puedes corregir marcaciones de un empleado que no pertenece a tu area.');
 
         [$fechaHora, $error] = $this->combinarFechaHora($request->input('fecha'), $request->input('hora'));
         $comentario = trim((string) $request->input('comentario'));
@@ -254,7 +262,14 @@ class RegistroTiempoController
             return;
         }
 
-        RegistroTiempoModel::delete((int) $request->param('id'));
+        $id = (int) $request->param('id');
+        $registro = RegistroTiempoModel::find($id);
+        if (!$registro) {
+            Response::abort(404, 'Marcacion no encontrada.');
+        }
+        AlcanceAreasService::autorizarEmpleadoOAbortar((int) $registro['empleado_id'], 'No puedes eliminar marcaciones de un empleado que no pertenece a tu area.');
+
+        RegistroTiempoModel::delete($id);
 
         Session::flash('success', 'Marcacion eliminada.');
         Response::redirect('/registros-tiempo');

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Core\Auth;
+use App\Core\Response;
 use App\Models\EmpleadoModel;
 use App\Models\SupervisorAreaModel;
 
@@ -44,9 +45,53 @@ class AlcanceAreasService
         return array_values(array_unique($areaIds));
     }
 
+    /**
+     * Rol de autoservicio: el Empleado solo ve y gestiona lo suyo, no el
+     * resto de su area (Calendario, Novedades y Reportes ya lo trataban asi
+     * por su cuenta; aqui queda centralizado). Si a ese rol se le diera
+     * equipos.ver_todas por decision explicita, deja de ser autoservicio.
+     */
+    public static function esAutoservicio(): bool
+    {
+        return (Auth::usuario()['rol_nombre'] ?? '') === 'Empleado' && !Auth::veTodasLasAreas();
+    }
+
+    /** true si el area esta dentro del alcance del usuario en sesion (ver todas = cualquiera). */
+    public static function areaPermitida(int $areaId): bool
+    {
+        $areaIds = self::areaIdsPermitidos();
+        return $areaIds === null || in_array($areaId, $areaIds, true);
+    }
+
+    /**
+     * Autorizacion por fila para acciones que reciben un empleado_id:
+     * 404 si no existe, 403 si no esta en el alcance del usuario en sesion.
+     * Devuelve la fila del empleado. Los listados ya filtraban por alcance,
+     * pero las acciones de escritura aceptaban cualquier id.
+     */
+    public static function autorizarEmpleadoOAbortar(int $empleadoId, string $mensaje403 = 'No tienes permiso sobre este empleado (no pertenece a tu area).'): array
+    {
+        $empleado = EmpleadoModel::find($empleadoId);
+        if (!$empleado) {
+            Response::abort(404, 'Empleado no encontrado');
+        }
+
+        $idsPermitidos = self::empleadoIdsPermitidos();
+        if ($idsPermitidos !== null && !in_array($empleadoId, $idsPermitidos, true)) {
+            Response::abort(403, $mensaje403);
+        }
+
+        return $empleado;
+    }
+
     /** @return int[]|null empleado_id visibles para el usuario en sesion; null = TODOS (sin restriccion). */
     public static function empleadoIdsPermitidos(): ?array
     {
+        if (self::esAutoservicio()) {
+            $propio = EmpleadoModel::porUsuario((int) Auth::id());
+            return $propio ? [(int) $propio['id']] : [];
+        }
+
         $areaIds = self::areaIdsPermitidos();
         if ($areaIds === null) {
             return null;
@@ -75,6 +120,11 @@ class AlcanceAreasService
     {
         if (Auth::veTodasLasAreas()) {
             return EmpleadoModel::todosConSupervisor();
+        }
+
+        if (self::esAutoservicio()) {
+            $propio = EmpleadoModel::porUsuario((int) Auth::id());
+            return $propio ? [$propio] : [];
         }
 
         $areaIds = self::areaIdsPermitidos();

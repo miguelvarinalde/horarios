@@ -28,6 +28,20 @@ class Ms365AuthService
 {
     private GenericProvider $provider;
 
+    /**
+     * El tenant se concatena en la URL de login.microsoftonline.com: debe ser
+     * el GUID del directorio o un dominio verificado, nunca los alias
+     * multi-tenant (common, organizations, consumers) que aceptarian
+     * cuentas de cualquier organizacion.
+     */
+    public static function tenantValido(string $tenant): bool
+    {
+        $guid = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i';
+        $dominio = '/^(?=.{4,253}\z)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\z/i';
+
+        return (bool) preg_match($guid, $tenant) || (bool) preg_match($dominio, $tenant);
+    }
+
     public function __construct()
     {
         $config = ConfiguracionMs365Model::obtener();

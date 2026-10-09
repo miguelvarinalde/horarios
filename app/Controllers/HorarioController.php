@@ -224,20 +224,15 @@ class HorarioController
      * sin importar su area, con solo cambiar el {empleadoId} de la URL. Se
      * agrega aqui la unica validacion real de autorizacion por fila del
      * controlador: existencia del empleado + (si el usuario no ve todas las
-     * areas) que el empleado pertenezca a la misma area.
+     * areas) que el empleado pertenezca a la misma area. La regla vive ahora en
+     * AlcanceAreasService::autorizarEmpleadoOAbortar() (la comparten otros
+     * controladores) y para el rol Empleado el alcance es solo su propia ficha.
      */
     private function empleadoAutorizadoOAbortar(int $empleadoId): array
     {
-        $empleado = EmpleadoModel::find($empleadoId);
-        if (!$empleado) {
-            Response::abort(404, 'Empleado no encontrado');
-        }
-
-        $idsPermitidos = AlcanceAreasService::empleadoIdsPermitidos();
-        if ($idsPermitidos !== null && !in_array($empleadoId, $idsPermitidos, true)) {
-            Response::abort(403, 'No tienes permiso para gestionar el horario de este empleado (no pertenece a tu area).');
-        }
-
-        return $empleado;
+        return AlcanceAreasService::autorizarEmpleadoOAbortar(
+            $empleadoId,
+            'No tienes permiso para gestionar el horario de este empleado (no pertenece a tu area).'
+        );
     }
 }

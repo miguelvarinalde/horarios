@@ -14,6 +14,7 @@ use App\Models\PeriodoNoLaborableModel;
 use App\Models\TipoNovedadModel;
 use App\Models\TipoRecargoModel;
 use App\Services\FestivosService;
+use App\Services\RangoFechasService;
 
 class AdminConfigController
 {
@@ -153,12 +154,30 @@ class AdminConfigController
 
         $anterior = ConfiguracionSitioModel::obtener()['logo_path'] ?? null;
         ConfiguracionSitioModel::guardarLogo($nombreArchivo);
-        if ($anterior) {
-            @unlink($directorio . '/' . $anterior);
-        }
+        $this->borrarArchivoDeLogo($anterior);
 
         Session::flash('success', 'Logo actualizado.');
         Response::redirect('/admin/sitio');
+    }
+
+    /**
+     * Borra un archivo de logo solo si su nombre tiene el formato que genera
+     * subirLogo() (logo_<16 hex>.<ext>) y se resuelve dentro de la carpeta de
+     * logos: el valor viene de la base de datos y nunca debe poder apuntar
+     * fuera de ella.
+     */
+    private function borrarArchivoDeLogo(?string $nombre): void
+    {
+        if ($nombre === null || $nombre === '') {
+            return;
+        }
+
+        $nombre = basename($nombre);
+        if (!preg_match('/^logo_[0-9a-f]{16}\.(png|jpg|gif|webp)\z/', $nombre)) {
+            return;
+        }
+
+        @unlink(dirname(__DIR__, 2) . '/public/uploads/logo/' . $nombre);
     }
 
     public function eliminarLogo(Request $request)
@@ -170,9 +189,7 @@ class AdminConfigController
 
         $actual = ConfiguracionSitioModel::obtener()['logo_path'] ?? null;
         ConfiguracionSitioModel::eliminarLogo();
-        if ($actual) {
-            @unlink(dirname(__DIR__, 2) . '/public/uploads/logo/' . $actual);
-        }
+        $this->borrarArchivoDeLogo($actual);
 
         Session::flash('success', 'Logo eliminado.');
         Response::redirect('/admin/sitio');
@@ -310,7 +327,8 @@ class AdminConfigController
     public function mostrarPeriodosNoLaborables(Request $request): string
     {
         return View::render('admin/periodos_no_laborables', [
-            'periodos' => PeriodoNoLaborableModel::all(),
+            'periodos' => PeriodoNoLaborableModel::conAreas(),
+            'areas' => AreaModel::activas(),
         ]);
     }
 
@@ -321,15 +339,31 @@ class AdminConfigController
             return;
         }
 
-        PeriodoNoLaborableModel::insert([
-            'nombre' => trim((string) $request->input('nombre')),
-            'fecha_inicio' => $request->input('fecha_inicio'),
-            'fecha_fin' => $request->input('fecha_fin'),
+        $nombre = trim((string) $request->input('nombre'));
+        $inicio = RangoFechasService::fecha((string) $request->input('fecha_inicio'));
+        $fin = RangoFechasService::fecha((string) $request->input('fecha_fin'));
+        if ($nombre === '' || $inicio === null || $fin === null || $fin < $inicio) {
+            Session::flash('error', 'Revisa el nombre y las fechas: "Hasta" no puede ser anterior a "Desde".');
+            Response::redirect('/admin/periodos-no-laborables');
+            return;
+        }
+
+        // Areas marcadas (ninguna = toda la empresa). Solo se aceptan areas existentes.
+        $validas = array_map(fn ($a) => (int) $a['id'], AreaModel::all());
+        $areaIds = array_values(array_intersect(array_map('intval', (array) $request->input('areas', [])), $validas));
+
+        $periodoId = PeriodoNoLaborableModel::insert([
+            'nombre' => $nombre,
+            'fecha_inicio' => $inicio->format('Y-m-d'),
+            'fecha_fin' => $fin->format('Y-m-d'),
             'aplica_a' => 'empresa',
             'descripcion' => $request->input('descripcion') ?: null,
         ]);
+        PeriodoNoLaborableModel::sincronizarAreas($periodoId, $areaIds);
 
-        Session::flash('success', 'Periodo no laborable creado.');
+        Session::flash('success', $areaIds
+            ? 'Periodo no laborable creado para ' . count($areaIds) . ' area(s). Recalcula los periodos de reporte que lo incluyan.'
+            : 'Periodo no laborable creado para toda la empresa. Recalcula los periodos de reporte que lo incluyan.');
         Response::redirect('/admin/periodos-no-laborables');
     }
 

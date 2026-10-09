@@ -9,6 +9,7 @@ use App\Core\View;
 use App\Models\ConfiguracionCalendarioMs365Model;
 use App\Models\EventoCalendarioMs365Model;
 use App\Services\CalendarioMs365Service;
+use App\Services\Ms365AuthService;
 
 class CalendarioMs365ConfigController
 {
@@ -24,6 +25,12 @@ class CalendarioMs365ConfigController
     {
         if (!Session::verifyCsrf($request->input('_csrf'))) {
             Response::abort(419, 'Formulario expirado, intenta de nuevo.');
+            return;
+        }
+
+        if (!Ms365AuthService::tenantValido(trim((string) $request->input('tenant_id')))) {
+            Session::flash('error', 'El Tenant ID no es valido: usa el GUID del directorio (ID de inquilino) o su dominio, por ejemplo inalde.edu.co. No se aceptan "common", "organizations" ni "consumers".');
+            Response::redirect('/admin/calendario-ms365');
             return;
         }
 

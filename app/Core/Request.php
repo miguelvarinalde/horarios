@@ -56,6 +56,12 @@ class Request
 
     public function input(string $key, $default = null)
     {
+        // El token CSRF solo se acepta en el cuerpo del POST: en la URL
+        // quedaria en historiales, logs y cabecera Referer.
+        if ($key === '_csrf') {
+            return $this->body[$key] ?? $default;
+        }
+
         return $this->body[$key] ?? $this->query[$key] ?? $default;
     }
 

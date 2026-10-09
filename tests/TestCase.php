@@ -32,6 +32,8 @@ abstract class TestCase extends BaseTestCase
     private array $periodosCreados = [];
     /** @var int[] */
     private array $configuracionesCreadas = [];
+    /** @var int[] */
+    private array $areasCreadas = [];
 
     protected function setUp(): void
     {
@@ -45,6 +47,10 @@ abstract class TestCase extends BaseTestCase
         }
         foreach ($this->usuariosCreados as $id) {
             $this->db->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
+        }
+        // Despues de los empleados (FK empleados.area_id); borra en cascada los periodos no laborables por area.
+        foreach ($this->areasCreadas as $id) {
+            $this->db->prepare('DELETE FROM areas WHERE id = ?')->execute([$id]);
         }
         foreach ($this->periodosCreados as $id) {
             $this->db->prepare('DELETE FROM periodos_calculo WHERE id = ?')->execute([$id]);
@@ -63,6 +69,20 @@ abstract class TestCase extends BaseTestCase
         $id = (int) $this->db->lastInsertId();
         $this->usuariosCreados[] = $id;
         return $id;
+    }
+
+    /** Area de prueba (se elimina en tearDown). */
+    protected function crearArea(): int
+    {
+        $this->db->prepare('INSERT INTO areas (nombre, activo) VALUES (?, 1)')->execute(['Area de prueba ' . bin2hex(random_bytes(4)), ]);
+        $id = (int) $this->db->lastInsertId();
+        $this->areasCreadas[] = $id;
+        return $id;
+    }
+
+    protected function asignarArea(int $empleadoId, int $areaId): void
+    {
+        $this->db->prepare('UPDATE empleados SET area_id = ? WHERE id = ?')->execute([$areaId, $empleadoId]);
     }
 
     protected function crearEmpleado(): int
@@ -241,13 +261,18 @@ abstract class TestCase extends BaseTestCase
         $this->db->prepare('DELETE FROM festivos WHERE fecha = ?')->execute([$fecha]);
     }
 
-    protected function crearPeriodoNoLaborable(string $fechaInicio, string $fechaFin): int
+    /** @param int[] $areaIds vacio = toda la empresa */
+    protected function crearPeriodoNoLaborable(string $fechaInicio, string $fechaFin, array $areaIds = []): int
     {
         $stmt = $this->db->prepare(
-            "INSERT INTO periodos_no_laborables (nombre, fecha_inicio, fecha_fin, aplica_a) VALUES ('Periodo no laborable de prueba', ?, ?, 'empresa')"
+            "INSERT INTO periodos_no_laborables (nombre, fecha_inicio, fecha_fin, aplica_a) VALUES ('Periodo no laborable de prueba', ?, ?, ?)"
         );
-        $stmt->execute([$fechaInicio, $fechaFin]);
-        return (int) $this->db->lastInsertId();
+        $stmt->execute([$fechaInicio, $fechaFin, $areaIds ? 'area' : 'empresa']);
+        $id = (int) $this->db->lastInsertId();
+        foreach ($areaIds as $areaId) {
+            $this->db->prepare('INSERT INTO periodos_no_laborables_areas (periodo_id, area_id) VALUES (?, ?)')->execute([$id, $areaId]);
+        }
+        return $id;
     }
 
     protected function eliminarPeriodoNoLaborable(int $id): void

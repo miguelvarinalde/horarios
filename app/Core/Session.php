@@ -8,16 +8,34 @@ class Session
     {
         if (session_status() === PHP_SESSION_NONE) {
             $config = require dirname(__DIR__, 2) . '/config/app.php';
+            // Modo estricto: el servidor rechaza un id de sesion que el no
+            // emitio (impide la fijacion de sesion con un id elegido por
+            // un atacante). Solo cookies: nunca aceptar el id por URL.
+            ini_set('session.use_strict_mode', '1');
+            ini_set('session.use_only_cookies', '1');
             session_name($config['session']['name']);
             session_set_cookie_params([
                 'lifetime' => $config['session']['lifetime_minutes'] * 60,
                 'path' => '/',
                 'httponly' => true,
                 'samesite' => 'Lax',
-                'secure' => !empty($_SERVER['HTTPS']),
+                'secure' => SecurityHeaders::esHttps(),
             ]);
             session_start();
         }
+    }
+
+    /**
+     * Cambia el id de sesion (y descarta el token CSRF anterior) al
+     * autenticarse: un id conocido de antemano por otra persona deja de
+     * servir en cuanto la victima inicia sesion.
+     */
+    public static function regenerar(): void
+    {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_regenerate_id(true);
+        }
+        unset($_SESSION['_csrf']);
     }
 
     public static function put(string $key, $value): void

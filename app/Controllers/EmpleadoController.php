@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Core\Auth;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Session;
@@ -9,11 +10,11 @@ use App\Core\View;
 use App\Models\AreaModel;
 use App\Models\EmpleadoModel;
 use App\Models\HorarioBaseModel;
-use App\Models\RolModel;
 use App\Models\SupervisorAreaModel;
 use App\Models\UsuarioModel;
 use App\Services\AlcanceAreasService;
 use App\Services\CalendarioMs365Service;
+use App\Services\PrivilegiosService;
 
 class EmpleadoController
 {
@@ -33,7 +34,9 @@ class EmpleadoController
             'empleado' => null,
             'supervisores' => EmpleadoModel::posiblesSupervisores(),
             'areas' => AreaModel::activas(),
-            'roles' => RolModel::all('nombre ASC'),
+            // Solo los roles que el usuario en sesion puede conceder (no puede
+            // crear una cuenta con mas permisos de los que el mismo tiene).
+            'roles' => PrivilegiosService::rolesAsignables(Auth::permisos()),
         ]);
     }
 
@@ -44,19 +47,35 @@ class EmpleadoController
             return;
         }
 
+        // Todo se valida ANTES de crear nada, para no dejar un empleado a
+        // medias si el rol pedido no se puede conceder.
+        $areaId = $request->input('area_id') ?: null;
+        if ($areaId !== null && !AlcanceAreasService::areaPermitida((int) $areaId)) {
+            Response::abort(403, 'No puedes crear empleados en un area fuera de tu alcance.');
+            return;
+        }
+
+        $crearUsuario = $request->input('crear_usuario');
+        $conCuenta = $crearUsuario && $request->input('email');
+        $rolId = (int) $request->input('rol_id');
+        if ($conCuenta && !Auth::puedeAsignarRol($rolId)) {
+            Session::flash('error', 'No puedes crear una cuenta con ese rol: incluye permisos que tu rol no tiene. No se creo el empleado.');
+            Response::redirect('/empleados/crear');
+            return;
+        }
+
         $empleadoId = EmpleadoModel::insert([
             'nombre' => trim((string) $request->input('nombre')),
             'documento' => trim((string) $request->input('documento')),
             'cargo' => $request->input('cargo') ?: null,
             'fecha_ingreso' => $request->input('fecha_ingreso'),
             'supervisor_id' => $request->input('supervisor_id') ?: null,
-            'area_id' => $request->input('area_id') ?: null,
+            'area_id' => $areaId,
             'activo' => 1,
         ]);
 
         // Opcionalmente, crear cuenta de usuario para el empleado.
-        $crearUsuario = $request->input('crear_usuario');
-        if ($crearUsuario && $request->input('email')) {
+        if ($conCuenta) {
             $passwordIngresada = trim((string) $request->input('password', ''));
             $password = $passwordIngresada !== '' ? $passwordIngresada : bin2hex(random_bytes(6));
 
@@ -68,7 +87,7 @@ class EmpleadoController
                 // real del usuario a largo plazo: se le obliga a cambiarla
                 // en su primer login (ver AuthMiddleware).
                 'debe_cambiar_password' => 1,
-                'rol_id' => (int) $request->input('rol_id'),
+                'rol_id' => $rolId,
                 'activo' => 1,
             ]);
             \App\Models\EmpleadoModel::update($empleadoId, ['usuario_id' => $usuarioId]);
@@ -89,10 +108,7 @@ class EmpleadoController
     public function editar(Request $request): string
     {
         $id = (int) $request->param('id');
-        $empleado = EmpleadoModel::find($id);
-        if (!$empleado) {
-            Response::abort(404, 'Empleado no encontrado');
-        }
+        $empleado = AlcanceAreasService::autorizarEmpleadoOAbortar($id);
 
         $usuarioVinculado = $empleado['usuario_id'] ? UsuarioModel::find((int) $empleado['usuario_id']) : null;
 
@@ -100,7 +116,7 @@ class EmpleadoController
             'empleado' => $empleado,
             'supervisores' => array_filter(EmpleadoModel::posiblesSupervisores(), fn ($s) => $s['id'] != $id),
             'areas' => AreaModel::activas(),
-            'roles' => RolModel::all('nombre ASC'),
+            'roles' => PrivilegiosService::rolesAsignables(Auth::permisos()),
             'areaIdsAdicionales' => $usuarioVinculado ? SupervisorAreaModel::areaIdsDe((int) $usuarioVinculado['id']) : [],
             'usuarioEmail' => $usuarioVinculado['email'] ?? null,
         ]);
@@ -114,10 +130,39 @@ class EmpleadoController
         }
 
         $id = (int) $request->param('id');
-        $empleado = EmpleadoModel::find($id);
+        $empleado = AlcanceAreasService::autorizarEmpleadoOAbortar($id);
+
+        $areaId = $request->input('area_id') ?: null;
+        if ($areaId !== null && !AlcanceAreasService::areaPermitida((int) $areaId)) {
+            Response::abort(403, 'No puedes mover a un empleado a un area fuera de tu alcance.');
+            return;
+        }
 
         $sincronizarCalendarioAnterior = (bool) ($empleado['sincronizar_calendario'] ?? false);
         $sincronizarCalendarioNuevo = (bool) $request->input('sincronizar_calendario');
+
+        $usuarioId = $empleado['usuario_id'] ? (int) $empleado['usuario_id'] : null;
+        $avisos = [];
+
+        $activoSolicitado = $request->input('activo') ? 1 : 0;
+        $activoNuevo = $activoSolicitado;
+
+        // La cuenta de acceso vinculada solo se modifica (estado y correo) si
+        // quien edita ya tiene todos los permisos de esa cuenta: de lo
+        // contrario RRHH podria dar de baja o redirigir el correo de un
+        // Administrador (ver PrivilegiosService).
+        $puedeSobreCuenta = $usuarioId !== null && Auth::puedeGestionarUsuario($usuarioId);
+        if ($usuarioId !== null) {
+            if (!$puedeSobreCuenta) {
+                $activoNuevo = (int) $empleado['activo'];
+                if ($activoSolicitado !== $activoNuevo) {
+                    $avisos[] = 'No se cambio el estado activo: la cuenta de este empleado tiene permisos que tu rol no tiene.';
+                }
+            } elseif ($usuarioId === (int) Auth::id() && $activoNuevo === 0) {
+                $activoNuevo = 1;
+                $avisos[] = 'No puedes desactivar tu propia cuenta; el empleado se mantuvo activo.';
+            }
+        }
 
         EmpleadoModel::update($id, [
             'nombre' => trim((string) $request->input('nombre')),
@@ -125,25 +170,46 @@ class EmpleadoController
             'cargo' => $request->input('cargo') ?: null,
             'fecha_ingreso' => $request->input('fecha_ingreso'),
             'supervisor_id' => $request->input('supervisor_id') ?: null,
-            'area_id' => $request->input('area_id') ?: null,
-            'activo' => $request->input('activo') ? 1 : 0,
+            'area_id' => $areaId,
+            'activo' => $activoNuevo,
             'sincronizar_calendario' => $sincronizarCalendarioNuevo ? 1 : 0,
         ]);
 
-        if ($empleado && $empleado['usuario_id']) {
-            $usuarioId = (int) $empleado['usuario_id'];
+        if ($usuarioId !== null) {
+            $usuarioActual = UsuarioModel::find($usuarioId);
+
+            // La baja (o reactivacion) del empleado se refleja en su cuenta:
+            // antes solo cambiaba empleados.activo y el usuario seguia
+            // entrando. Auth::check() revalida usuarios.activo en cada
+            // peticion, asi que tambien cierra sus sesiones abiertas.
+            if ($puedeSobreCuenta && $usuarioActual && (int) $usuarioActual['activo'] !== $activoNuevo) {
+                UsuarioModel::update($usuarioId, ['activo' => $activoNuevo]);
+            }
 
             // Areas adicionales que puede supervisar (2026-09-05, ademas de
-            // su propia area de arriba).
+            // su propia area de arriba). Quien no ve todas las areas solo
+            // puede asignar/quitar areas DENTRO de su propio alcance: las
+            // que ya tuviera la cuenta fuera de ese alcance se conservan, y
+            // nadie puede ampliar su alcance (ni el de otro) mas alla del suyo.
             $areaIds = array_map('intval', (array) $request->input('areas_adicionales', []));
+            $areasPermitidas = AlcanceAreasService::areaIdsPermitidos();
+            if ($areasPermitidas !== null) {
+                $conservadas = array_diff(SupervisorAreaModel::areaIdsDe($usuarioId), $areasPermitidas);
+                $areaIds = array_values(array_unique(array_merge($conservadas, array_intersect($areaIds, $areasPermitidas))));
+            }
             SupervisorAreaModel::sincronizar($usuarioId, $areaIds);
 
             // Correo de la cuenta de acceso (2026-09-05, antes no habia
             // forma de corregirlo desde esta pantalla si el empleado
             // cambiaba de correo o se habia digitado mal al crearlo).
-            $usuarioActual = UsuarioModel::find($usuarioId);
             $emailActual = $usuarioActual['email'] ?? '';
             $nuevoEmail = trim((string) $request->input('email', ''));
+            if (!$puedeSobreCuenta && $nuevoEmail !== '' && $nuevoEmail !== $emailActual) {
+                // El SSO de Microsoft 365 vincula la cuenta por correo: poder
+                // cambiarlo equivale a poder entrar como esa cuenta.
+                $avisos[] = 'No se cambio el correo: la cuenta de este empleado tiene permisos que tu rol no tiene.';
+                $nuevoEmail = '';
+            }
             $emailCambio = $nuevoEmail !== '' && $nuevoEmail !== $emailActual;
 
             if ($emailCambio && $sincronizarCalendarioAnterior) {
@@ -185,6 +251,9 @@ class EmpleadoController
             }
         }
 
+        if ($avisos) {
+            Session::flash('error', implode(' ', $avisos));
+        }
         Session::flash('success', 'Empleado actualizado correctamente.');
         Response::redirect('/empleados');
     }

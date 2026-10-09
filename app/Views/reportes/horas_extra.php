@@ -6,6 +6,7 @@
     <div style="display:flex;gap:.5rem;margin-bottom:1rem">
         <a href="/reportes/horas-extra?rango=dia" class="btn btn-sm">Hoy</a>
         <a href="/reportes/horas-extra?rango=semana" class="btn btn-sm">Esta semana</a>
+        <a href="/reportes/horas-extra?rango=semana_siguiente" class="btn btn-sm">Semana siguiente</a>
         <a href="/reportes/horas-extra?rango=mes" class="btn btn-sm">Este mes</a>
     </div>
     <p class="text-muted" style="margin-top:-.75rem;font-size:.9em">Consulta rapida sin crear un periodo a mano: busca (o crea automaticamente, si tienes permiso de calculo) el periodo que cubre ese rango.</p>
@@ -41,6 +42,24 @@
     <?php if ($periodo && Auth::puede('reportes.exportar')): ?>
         <a href="/reportes/horas-extra/exportar-excel?periodo_id=<?= (int) $periodoId ?>" class="btn">Exportar Excel</a>
         <a href="/reportes/horas-extra/exportar-pdf?periodo_id=<?= (int) $periodoId ?>" class="btn">Exportar PDF</a>
+    <?php endif; ?>
+
+    <?php if ($periodo && !empty($periodosNoLaborables)): ?>
+        <div class="alert alert-error" style="margin-top:1rem">
+            <strong>Este rango incluye periodos no laborables.</strong>
+            Durante esos dias el horario programado no suma horas (solo cuentan las novedades de trabajo en festivo):
+            <ul style="margin:.4rem 0 0 1.2rem">
+                <?php foreach ($periodosNoLaborables as $pnl): ?>
+                    <li>
+                        <?= View::e($pnl['nombre']) ?> (<?= View::e($pnl['fecha_inicio']) ?> a <?= View::e($pnl['fecha_fin']) ?>) &mdash;
+                        <?= empty($pnl['areas']) ? 'toda la empresa' : View::e(implode(', ', $pnl['areas'])) ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+            <?php if (Auth::puede('admin.periodos_no_laborables')): ?>
+                <a href="/admin/periodos-no-laborables">Administrar periodos no laborables</a>
+            <?php endif; ?>
+        </div>
     <?php endif; ?>
 
     <?php if ($periodo): ?>

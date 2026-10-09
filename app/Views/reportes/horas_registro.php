@@ -83,6 +83,9 @@
                         <?php else: ?>
                             <?php foreach ($dia['marcaciones'] as $m): ?>
                                 <?= $m['tipo'] === 'entrada' ? 'Entrada' : 'Salida' ?> <?= substr($m['fecha_hora'], 11, 5) ?><br>
+                                <?php if (!empty($m['comentario'])): ?>
+                                    <span class="text-muted" style="font-size:.85em"><?= View::e($m['comentario']) ?></span><br>
+                                <?php endif; ?>
                             <?php endforeach; ?>
                         <?php endif; ?>
                         <?php if ($dia['estado'] === 'cerrado_automatico' && $dia['salida_estimada']): ?>

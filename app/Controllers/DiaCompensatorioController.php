@@ -9,6 +9,7 @@ use App\Core\Session;
 use App\Core\View;
 use App\Models\DiaCompensatorioModel;
 use App\Services\AlcanceAreasService;
+use App\Services\RangoFechasService;
 
 class DiaCompensatorioController
 {
@@ -43,6 +44,7 @@ class DiaCompensatorioController
             Response::abort(404, 'Registro no encontrado.');
             return;
         }
+        AlcanceAreasService::autorizarEmpleadoOAbortar((int) $dia['empleado_id'], 'No puedes gestionar dias compensatorios de un empleado que no pertenece a tu area.');
 
         if ($dia['clasificacion'] === 'habitual') {
             Session::flash('error', 'Este dia es de trabajo dominical/festivo habitual (3 o mas en el mes): la ley da derecho a recargo Y descanso compensatorio, no es una eleccion.');
@@ -71,6 +73,13 @@ class DiaCompensatorioController
         }
 
         $id = (int) $request->param('id');
+        $dia = DiaCompensatorioModel::find($id);
+        if (!$dia) {
+            Response::abort(404, 'Registro no encontrado.');
+            return;
+        }
+        AlcanceAreasService::autorizarEmpleadoOAbortar((int) $dia['empleado_id'], 'No puedes gestionar dias compensatorios de un empleado que no pertenece a tu area.');
+
         $fecha = $request->input('descanso_tomado_fecha');
 
         if (!$fecha) {
@@ -78,6 +87,14 @@ class DiaCompensatorioController
             Response::redirect('/dias-compensatorios');
             return;
         }
+
+        $fechaValida = RangoFechasService::fecha((string) $fecha);
+        if ($fechaValida === null) {
+            Session::flash('error', 'La fecha del descanso no es valida.');
+            Response::redirect('/dias-compensatorios');
+            return;
+        }
+        $fecha = $fechaValida->format('Y-m-d');
 
         DiaCompensatorioModel::marcarDescansoTomado($id, $fecha);
 

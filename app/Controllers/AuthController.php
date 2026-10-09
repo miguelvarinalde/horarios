@@ -66,6 +66,14 @@ class AuthController
 
     public function logout(Request $request)
     {
+        // Sin token valido no se cierra la sesion: otra pagina no debe poder
+        // sacar al usuario con un formulario oculto. El boton "Salir" del
+        // menu ya envia el token.
+        if (!Session::verifyCsrf($request->input('_csrf'))) {
+            Response::redirect(Auth::check() ? '/' : '/login');
+            return;
+        }
+
         Auth::logout();
         Response::redirect('/login');
     }

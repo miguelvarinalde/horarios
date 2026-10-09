@@ -2,11 +2,13 @@
 
 namespace App\Controllers;
 
+use App\Core\Auth;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Session;
 use App\Core\View;
 use App\Models\UsuarioModel;
+use App\Services\PrivilegiosService;
 
 class UsuarioController
 {
@@ -15,6 +17,8 @@ class UsuarioController
         return View::render('usuarios/index', [
             'usuarios' => UsuarioModel::todosConRol(),
             'passwordGenerada' => Session::getFlash('password_generada'),
+            // Solo cosmetico (oculta el boton): el control real esta en resetearPassword().
+            'idsGestionables' => PrivilegiosService::idsUsuariosGestionables(Auth::permisos()),
         ]);
     }
 
@@ -29,6 +33,14 @@ class UsuarioController
         $usuario = UsuarioModel::find($id);
         if (!$usuario) {
             Response::abort(404, 'Usuario no encontrado.');
+            return;
+        }
+
+        // Quien resetea la clave la recibe en claro: si el usuario objetivo
+        // tiene permisos que el actor no tiene (p. ej. RRHH sobre el
+        // Administrador), el reseteo equivaldria a tomar esa cuenta.
+        if (!Auth::puedeGestionarUsuario($id)) {
+            Response::abort(403, 'No puedes reiniciar la contrasena de un usuario con mas permisos que tu.');
             return;
         }
 

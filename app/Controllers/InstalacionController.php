@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Core\Database;
+use App\Core\EnvFile;
 use App\Core\Migrator;
 use App\Core\Request;
 use App\Core\Response;
@@ -36,15 +37,33 @@ class InstalacionController
             return true;
         }
 
+        // Si hay un .env con base de datos configurada y la BD no responde
+        // (o falla de forma inesperada), el asistente se CIERRA: el lock no
+        // viaja en el paquete de despliegue, y una falla momentanea de la BD
+        // no debe dejar /instalar abierto a cualquiera (podria apuntar la
+        // app a otra BD y crear un Administrador). Solo se considera una
+        // instalacion nueva cuando no hay .env, o cuando la BD responde y
+        // todavia no tiene tablas/usuarios.
+        $configurado = !empty($_ENV['DB_DATABASE']);
+
         try {
             $pdo = Database::connection();
-            $tieneUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn() > 0;
-            if ($tieneUsuarios) {
-                $this->crearLock();
-                return true;
-            }
         } catch (\Throwable $e) {
-            // Sin conexion o sin tablas todavia: no esta instalado.
+            return $configurado;
+        }
+
+        try {
+            $tieneUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn() > 0;
+        } catch (\PDOException $e) {
+            // 42S02 = la tabla no existe todavia: base vacia, instalacion nueva.
+            return $e->getCode() === '42S02' ? false : $configurado;
+        } catch (\Throwable $e) {
+            return $configurado;
+        }
+
+        if ($tieneUsuarios) {
+            $this->crearLock();
+            return true;
         }
 
         return false;
@@ -104,6 +123,19 @@ class InstalacionController
             return;
         }
 
+        // Los valores terminan escritos en el .env: ningun salto de linea ni
+        // caracter de control, o se podrian inyectar variables nuevas.
+        try {
+            foreach ([$dbHost, $dbPort, $dbDatabase, $dbUsername, $dbPassword, $appUrl] as $valor) {
+                EnvFile::valor($valor);
+            }
+        } catch (\InvalidArgumentException $e) {
+            Session::flash('error', 'Los datos de conexion o la URL no pueden contener saltos de linea ni caracteres de control.');
+            Session::flash('valores', $valoresParaReintentar);
+            Response::redirect('/instalar');
+            return;
+        }
+
         // 1) Probar la conexion con los datos enviados ANTES de escribir nada.
         try {
             $dsn = sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $dbHost, $dbPort, $dbDatabase);
@@ -112,7 +144,9 @@ class InstalacionController
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
         } catch (PDOException $e) {
-            Session::flash('error', 'No fue posible conectar a la base de datos con esos datos: ' . $e->getMessage());
+            // No se refleja el mensaje del driver: puede revelar host, usuario
+            // o version del servidor a quien use esta pantalla anonima.
+            Session::flash('error', 'No fue posible conectar a la base de datos con esos datos. Revisa servidor, puerto, nombre, usuario y contrasena.');
             Session::flash('valores', $valoresParaReintentar);
             Response::redirect('/instalar');
             return;
@@ -125,7 +159,7 @@ class InstalacionController
             Seeder::aplicarSeeds($pdo, dirname(__DIR__, 2) . '/database/seeds');
             Seeder::crearAdministrador($pdo, $adminNombre, $adminEmail, $adminPassword);
         } catch (\Throwable $e) {
-            Session::flash('error', 'La conexion funciono, pero fallo al preparar la base de datos: ' . $e->getMessage());
+            Session::flash('error', 'La conexion funciono, pero fallo al preparar la base de datos. Revisa que la base este vacia y que el usuario tenga permisos para crear tablas.');
             Session::flash('valores', $valoresParaReintentar);
             Response::redirect('/instalar');
             return;
@@ -140,7 +174,11 @@ class InstalacionController
         $escrito = @file_put_contents($envPath, $envContenido);
 
         if ($escrito === false) {
-            // No se pudo escribir el archivo (permisos): se muestra para copiar a mano.
+            // No se pudo escribir el archivo (permisos): se muestra para copiar a
+            // mano. El administrador ya quedo creado, asi que el asistente se
+            // cierra tambien aqui (si no, seguiria abierto hasta que el
+            // usuario pegue el .env).
+            $this->crearLock();
             return View::render('instalar/manual', ['envContenido' => $envContenido], layout: null);
         }
 
@@ -164,20 +202,25 @@ class InstalacionController
     private function generarEnv(string $appUrl, string $dbHost, string $dbPort, string $dbDatabase, string $dbUsername, string $dbPassword): string
     {
         $appKey = bin2hex(random_bytes(32));
-        $dbPasswordEscapada = str_replace('"', '\\"', $dbPassword);
+        $appUrlEnv = EnvFile::valor($appUrl);
+        $dbHostEnv = EnvFile::valor($dbHost);
+        $dbPortEnv = EnvFile::valor($dbPort);
+        $dbDatabaseEnv = EnvFile::valor($dbDatabase);
+        $dbUsernameEnv = EnvFile::valor($dbUsername);
+        $dbPasswordEnv = EnvFile::valor($dbPassword);
 
         return <<<ENV
         APP_NAME="Sistema de Horarios"
         APP_ENV=production
         APP_DEBUG=false
-        APP_URL={$appUrl}
+        APP_URL={$appUrlEnv}
         APP_KEY={$appKey}
 
-        DB_HOST={$dbHost}
-        DB_PORT={$dbPort}
-        DB_DATABASE={$dbDatabase}
-        DB_USERNAME={$dbUsername}
-        DB_PASSWORD="{$dbPasswordEscapada}"
+        DB_HOST={$dbHostEnv}
+        DB_PORT={$dbPortEnv}
+        DB_DATABASE={$dbDatabaseEnv}
+        DB_USERNAME={$dbUsernameEnv}
+        DB_PASSWORD={$dbPasswordEnv}
 
         SESSION_NAME=horarios_session
         SESSION_LIFETIME=480

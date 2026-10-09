@@ -4,11 +4,25 @@ namespace App\Services;
 
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ReporteExportService
 {
+    /**
+     * Escribe texto proveniente de personas (nombres, comentarios de
+     * marcacion, motivos de novedad) como celda de TEXTO. Con
+     * setCellValue, un texto que empieza por "=", "+", "-" o "@" se
+     * interpreta como formula y Excel la ejecutaria al abrir el archivo
+     * (inyeccion de formulas).
+     */
+    private function escribirTexto(Worksheet $sheet, int $columna, int $fila, string $valor): void
+    {
+        $sheet->setCellValueExplicitByColumnAndRow($columna, $fila, $valor, DataType::TYPE_STRING);
+    }
+
     /**
      * Resume en una sola celda de texto las novedades (cualquier estado) de
      * un dia, para la columna "Permiso / Novedad" del Excel de horas segun
@@ -33,6 +47,28 @@ class ReporteExportService
     }
 
     /**
+     * Resume en una sola celda de texto los comentarios que el propio
+     * empleado escribe al marcar entrada/salida (registros_tiempo.comentario)
+     * — dato distinto de las novedades de RRHH (formatearNovedadesDelDia()):
+     * es un campo libre, no pasa por el modulo de Novedades.
+     *
+     * @param array<int, array{tipo:string, fecha_hora:string, comentario:?string}> $marcacionesDelDia
+     */
+    private function formatearComentariosDeMarcaciones(array $marcacionesDelDia): string
+    {
+        $partes = [];
+        foreach ($marcacionesDelDia as $m) {
+            if (empty($m['comentario'])) {
+                continue;
+            }
+            $tipo = $m['tipo'] === 'entrada' ? 'Entrada' : 'Salida';
+            $hora = substr($m['fecha_hora'], 11, 5);
+            $partes[] = "{$tipo} {$hora}: {$m['comentario']}";
+        }
+        return implode(' | ', $partes);
+    }
+
+    /**
      * @param array<int, array{empleado_nombre:string, recargos: array<string,float>, total_horas: float}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en orden
      */
@@ -52,7 +88,7 @@ class ReporteExportService
         $fila = 2;
         foreach ($filas as $registro) {
             $col = 1;
-            $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['empleado_nombre']);
+            $this->escribirTexto($sheet, $col++, $fila, (string) $registro['empleado_nombre']);
             foreach ($columnas as $codigo) {
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['recargos'][$codigo] ?? 0);
             }
@@ -69,6 +105,7 @@ class ReporteExportService
         header('Cache-Control: max-age=0');
 
         $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
         $writer->save('php://output');
         exit;
     }
@@ -77,7 +114,7 @@ class ReporteExportService
      * Informe dia por dia de un solo empleado (Horas trabajadas segun registro), con una
      * columna independiente por cada tipo de recargo que aparezca en el rango.
      *
-     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, novedades:array, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
+     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, novedades:array, marcaciones:array, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en el orden en que deben mostrarse
      * @param array<string,string> $nombresPorCodigo codigo => nombre completo del tipo de recargo
      */
@@ -96,6 +133,7 @@ class ReporteExportService
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida redondeada');
         $sheet->setCellValueByColumnAndRow($col++, 1, 'Permiso / Novedad');
+        $sheet->setCellValueByColumnAndRow($col++, 1, 'Comentario de marcacion');
         foreach ($columnas as $codigo) {
             $sheet->setCellValueByColumnAndRow($col++, 1, $nombresPorCodigo[$codigo] ?? $codigo);
             $sheet->setCellValueByColumnAndRow($col++, 1, ($nombresPorCodigo[$codigo] ?? $codigo) . ' (redondeado)');
@@ -116,12 +154,13 @@ class ReporteExportService
                 'incompleto' => 'Incompleto: ' . $dia['nota'],
                 default => 'Sin marcaciones',
             };
-            $sheet->setCellValueByColumnAndRow($col++, $fila, $estadoTexto);
+            $this->escribirTexto($sheet, $col++, $fila, $estadoTexto);
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['primera_entrada'] ? substr($dia['primera_entrada'], 0, 5) : '');
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['primera_entrada_redondeada'] ? substr($dia['primera_entrada_redondeada'], 0, 5) : '');
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['ultima_salida'] ? substr($dia['ultima_salida'], 0, 5) : '');
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['ultima_salida_redondeada'] ? substr($dia['ultima_salida_redondeada'], 0, 5) : '');
-            $sheet->setCellValueByColumnAndRow($col++, $fila, $this->formatearNovedadesDelDia($dia['novedades'] ?? []));
+            $this->escribirTexto($sheet, $col++, $fila, $this->formatearNovedadesDelDia($dia['novedades'] ?? []));
+            $this->escribirTexto($sheet, $col++, $fila, $this->formatearComentariosDeMarcaciones($dia['marcaciones'] ?? []));
             foreach ($columnas as $codigo) {
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos'][$codigo] ?? 0);
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos_redondeados'][$codigo] ?? 0);
@@ -142,6 +181,7 @@ class ReporteExportService
         header('Cache-Control: max-age=0');
 
         $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
         $writer->save('php://output');
         exit;
     }
@@ -175,7 +215,7 @@ class ReporteExportService
         $fila = 2;
         foreach ($filas as $registro) {
             $col = 1;
-            $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['empleado_nombre']);
+            $this->escribirTexto($sheet, $col++, $fila, (string) $registro['empleado_nombre']);
             foreach ($columnas as $codigo) {
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $registro['recargos'][$codigo] ?? 0);
             }
@@ -197,6 +237,7 @@ class ReporteExportService
         header('Cache-Control: max-age=0');
 
         $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
         $writer->save('php://output');
         exit;
     }

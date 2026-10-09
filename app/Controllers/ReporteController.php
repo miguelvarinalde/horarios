@@ -10,8 +10,10 @@ use App\Core\View;
 use App\Models\CalculoDetalleModel;
 use App\Models\EmpleadoModel;
 use App\Models\PeriodoCalculoModel;
+use App\Models\PeriodoNoLaborableModel;
 use App\Services\AlcanceAreasService;
 use App\Services\CalculoRecargosService;
+use App\Services\RangoFechasService;
 use App\Services\ReporteExportService;
 use App\Services\ReporteHorasRegistroService;
 
@@ -39,6 +41,7 @@ class ReporteController
         if (!$periodoId) {
             $periodoId = match ($request->query('rango')) {
                 'semana' => $this->resolverPeriodoDeLaSemanaActual(),
+                'semana_siguiente' => $this->resolverPeriodoDeLaSemanaActual(1),
                 'dia' => $this->resolverPeriodoDelDiaActual(),
                 default => $this->resolverPeriodoDelMesActual(),
             };
@@ -58,6 +61,7 @@ class ReporteController
             'periodos' => $periodos,
             'periodoId' => $periodoId,
             'periodo' => $periodo,
+            'periodosNoLaborables' => $periodo ? PeriodoNoLaborableModel::conAreas($periodo['fecha_inicio'], $periodo['fecha_fin']) : [],
             'filas' => $filas,
             'columnas' => $columnas,
             'puedeEliminarPeriodos' => $puedeEliminarPeriodos,
@@ -76,10 +80,13 @@ class ReporteController
         return $this->resolverOCrearPeriodoPorRango(date('Y-m-01'), date('Y-m-t'), $nombre);
     }
 
-    /** Busca (o crea) el periodo que cubre la semana actual (lunes a domingo). */
-    private function resolverPeriodoDeLaSemanaActual(): int
+    /**
+     * Busca (o crea) el periodo que cubre la semana actual (lunes a domingo),
+     * o la de otra semana si se pasa un desplazamiento (1 = la siguiente).
+     */
+    private function resolverPeriodoDeLaSemanaActual(int $desplazamientoSemanas = 0): int
     {
-        [$desde, $hasta] = $this->rangoSemanaActual();
+        [$desde, $hasta] = $this->rangoSemanaActual($desplazamientoSemanas);
         return $this->resolverOCrearPeriodoPorRango($desde, $hasta, "Semana del {$desde} al {$hasta}");
     }
 
@@ -90,12 +97,12 @@ class ReporteController
         return $this->resolverOCrearPeriodoPorRango($hoy, $hoy, "Dia {$hoy}");
     }
 
-    /** @return array{0: string, 1: string} [lunes, domingo] de la semana calendario en curso */
-    private function rangoSemanaActual(): array
+    /** @return array{0: string, 1: string} [lunes, domingo] de la semana calendario en curso (o desplazada N semanas) */
+    private function rangoSemanaActual(int $desplazamientoSemanas = 0): array
     {
         $hoy = new \DateTimeImmutable('today');
         $diasDesdeLunes = ((int) $hoy->format('N')) - 1; // N: 1 (lunes) .. 7 (domingo)
-        $lunes = $hoy->modify("-{$diasDesdeLunes} days");
+        $lunes = $hoy->modify("-{$diasDesdeLunes} days")->modify(sprintf('%+d weeks', $desplazamientoSemanas));
         $domingo = $lunes->modify('+6 days');
         return [$lunes->format('Y-m-d'), $domingo->format('Y-m-d')];
     }
@@ -194,10 +201,32 @@ class ReporteController
             $empleadoId = array_key_first($porId) ?? 0;
         }
 
-        $desde = $request->query('desde') ?: date('Y-m-01');
-        $hasta = $request->query('hasta') ?: date('Y-m-d');
+        [$desde, $hasta] = $this->rangoDeLaPeticion($request, date('Y-m-01'), date('Y-m-d'));
 
         return [$empleados, $empleadoId, $desde, $hasta, $porId[$empleadoId] ?? null];
+    }
+
+    /**
+     * Lee desde/hasta de la URL y los valida (formato Y-m-d, desde <= hasta y
+     * como maximo RangoFechasService::MAX_DIAS): los informes por registro
+     * recorren el rango dia por dia con consultas SQL, asi que un rango
+     * enorme o una fecha mal formada no debe llegar al motor. Si no son
+     * validos se avisa y se usa el rango por defecto.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function rangoDeLaPeticion(Request $request, string $desdePorDefecto, string $hastaPorDefecto): array
+    {
+        $desde = $request->query('desde') ?: $desdePorDefecto;
+        $hasta = $request->query('hasta') ?: $hastaPorDefecto;
+
+        $rango = RangoFechasService::validar((string) $desde, (string) $hasta);
+        if ($rango === null) {
+            Session::flash('error', 'El rango de fechas no es valido: usa fechas reales (desde no puede ser posterior a hasta) y no mas de ' . RangoFechasService::MAX_DIAS . ' dias. Se muestra el rango por defecto.');
+            return [$desdePorDefecto, $hastaPorDefecto];
+        }
+
+        return $rango;
     }
 
     /**
@@ -248,8 +277,7 @@ class ReporteController
 
     public function nominaRegistro(Request $request): string
     {
-        $desde = $request->query('desde') ?: date('Y-m-01');
-        $hasta = $request->query('hasta') ?: date('Y-m-t');
+        [$desde, $hasta] = $this->rangoDeLaPeticion($request, date('Y-m-01'), date('Y-m-t'));
 
         [$filas, $columnas] = $this->construirResumenNominaRegistro($this->empleadosEnAlcanceNominaRegistro(), $desde, $hasta);
 
@@ -263,8 +291,7 @@ class ReporteController
 
     public function exportarNominaRegistroExcel(Request $request)
     {
-        $desde = $request->query('desde') ?: date('Y-m-01');
-        $hasta = $request->query('hasta') ?: date('Y-m-t');
+        [$desde, $hasta] = $this->rangoDeLaPeticion($request, date('Y-m-01'), date('Y-m-t'));
 
         [$filas, $columnas] = $this->construirResumenNominaRegistro($this->empleadosEnAlcanceNominaRegistro(), $desde, $hasta);
 

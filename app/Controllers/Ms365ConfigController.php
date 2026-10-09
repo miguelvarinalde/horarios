@@ -7,6 +7,7 @@ use App\Core\Response;
 use App\Core\Session;
 use App\Core\View;
 use App\Models\ConfiguracionMs365Model;
+use App\Services\Ms365AuthService;
 
 class Ms365ConfigController
 {
@@ -21,6 +22,12 @@ class Ms365ConfigController
     {
         if (!Session::verifyCsrf($request->input('_csrf'))) {
             Response::abort(419, 'Formulario expirado, intenta de nuevo.');
+            return;
+        }
+
+        if (!Ms365AuthService::tenantValido(trim((string) $request->input('tenant_id')))) {
+            Session::flash('error', 'El Tenant ID no es valido: usa el GUID del directorio (ID de inquilino) o su dominio, por ejemplo inalde.edu.co. No se aceptan "common", "organizations" ni "consumers".');
+            Response::redirect('/admin/ms365');
             return;
         }
 

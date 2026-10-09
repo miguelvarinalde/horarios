@@ -124,7 +124,7 @@ class CalculoRecargosService
         $finSemana = $this->domingoDeLaSemana($periodo['fecha_fin']);
 
         $festivos = $this->festivosEnRango($inicioSemana, $finSemana);
-        $periodosNoLaborables = $this->periodosNoLaborablesEnRango($inicioSemana, $finSemana);
+        $periodosNoLaborables = $this->periodosNoLaborablesEnRango($inicioSemana, $finSemana, $this->areaDelEmpleado($empleadoId));
 
         $filas = [];
         $acumuladoSemanal = 0.0;
@@ -439,7 +439,7 @@ class CalculoRecargosService
         $inicioMes = date('Y-m-01', strtotime($fecha));
         $finMes = date('Y-m-t', strtotime($fecha));
         $festivosDelMes = $this->festivosEnRango($inicioMes, $finMes);
-        $periodosNoLaborablesDelMes = $this->periodosNoLaborablesEnRango($inicioMes, $finMes);
+        $periodosNoLaborablesDelMes = $this->periodosNoLaborablesEnRango($inicioMes, $finMes, $this->areaDelEmpleado($empleadoId));
 
         $diasTrabajados = 0;
         $cursor = new DateTimeImmutable($inicioMes);
@@ -559,13 +559,32 @@ class CalculoRecargosService
         return array_fill_keys($stmt->fetchAll(\PDO::FETCH_COLUMN), true);
     }
 
-    /** @return array<string, true> mapa fecha => true para cada dia cubierto por algun periodo no laborable */
-    private function periodosNoLaborablesEnRango(string $desde, string $hasta): array
+    private function areaDelEmpleado(int $empleadoId): ?int
+    {
+        $empleado = EmpleadoModel::find($empleadoId);
+        return $empleado && $empleado['area_id'] ? (int) $empleado['area_id'] : null;
+    }
+
+    /**
+     * Un periodo sin filas en periodos_no_laborables_areas es de TODA la
+     * empresa; con filas, aplica solo a los empleados de esas areas. Un
+     * empleado sin area ($areaId null) solo se ve afectado por los de toda
+     * la empresa.
+     *
+     * @return array<string, true> mapa fecha => true para cada dia cubierto por algun periodo no laborable que le aplique
+     */
+    private function periodosNoLaborablesEnRango(string $desde, string $hasta, ?int $areaId = null): array
     {
         $stmt = Database::connection()->prepare(
-            'SELECT fecha_inicio, fecha_fin FROM periodos_no_laborables WHERE fecha_inicio <= ? AND fecha_fin >= ?'
+            'SELECT p.fecha_inicio, p.fecha_fin
+             FROM periodos_no_laborables p
+             WHERE p.fecha_inicio <= ? AND p.fecha_fin >= ?
+               AND (
+                   NOT EXISTS (SELECT 1 FROM periodos_no_laborables_areas pa WHERE pa.periodo_id = p.id)
+                   OR EXISTS (SELECT 1 FROM periodos_no_laborables_areas pa WHERE pa.periodo_id = p.id AND pa.area_id = ?)
+               )'
         );
-        $stmt->execute([$hasta, $desde]);
+        $stmt->execute([$hasta, $desde, $areaId]);
 
         $mapa = [];
         foreach ($stmt->fetchAll() as $periodo) {
