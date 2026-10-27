@@ -3,9 +3,21 @@
     <h2>Horas trabajadas segun registro (dia por dia)</h2>
     <p class="text-muted">
         Este informe se calcula a partir de las marcaciones reales de entrada/salida, no del horario asignado.
-        Es un informe de verificacion/auditoria; el calculo legal de nomina sigue siendo
-        <a href="/reportes/horas-extra">Horas extra y recargos</a>.
+        <?php if (!empty($soloPropio)): ?>
+            Aqui puedes revisar y exportar tus propias horas del mes anterior y del mes actual.
+        <?php else: ?>
+            Es un informe de verificacion/auditoria; el calculo legal de nomina sigue siendo
+            <a href="/reportes/horas-extra">Horas extra y recargos</a>.
+        <?php endif; ?>
     </p>
+
+    <?php if (!empty($mesesRapidos)): ?>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
+            <?php foreach ($mesesRapidos as $m): ?>
+                <a href="/reportes/horas-registro?<?= View::e(http_build_query(['empleado_id' => $empleadoId, 'desde' => $m['desde'], 'hasta' => $m['hasta']])) ?>" class="btn btn-sm"><?= View::e($m['etiqueta']) ?></a>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
 
     <form method="get" action="/reportes/horas-registro" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:end;margin-bottom:1rem">
         <?php if (count($empleados) > 1): ?>
@@ -31,7 +43,7 @@
         <button type="submit" class="btn">Filtrar</button>
     </form>
 
-    <?php if ($empleadoId && Auth::puede('reportes.exportar')): ?>
+    <?php if ($empleadoId && (Auth::puede('reportes.exportar') || !empty($soloPropio))): ?>
         <a href="/reportes/horas-registro/exportar-excel?empleado_id=<?= (int) $empleadoId ?>&desde=<?= View::e($desde) ?>&hasta=<?= View::e($hasta) ?>" class="btn" style="margin-bottom:1rem;display:inline-block">Exportar Excel</a>
     <?php endif; ?>
 

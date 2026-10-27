@@ -10,6 +10,7 @@ use App\Models\EmpleadoModel;
 use App\Models\HorarioBaseModel;
 use App\Services\AlcanceAreasService;
 use App\Services\CalendarioMs365Service;
+use App\Services\RangoFechasService;
 
 class HorarioController
 {
@@ -47,6 +48,7 @@ class HorarioController
             'empleado' => $empleado,
             'dias' => self::DIAS,
             'vigencia' => null,
+            'atajos' => RangoFechasService::atajosDeVigencia(),
         ]);
     }
 
@@ -60,8 +62,26 @@ class HorarioController
         $empleadoId = (int) $request->param('empleadoId');
         $this->empleadoAutorizadoOAbortar($empleadoId);
 
-        $vigenteDesde = $request->input('vigente_desde');
-        $vigenteHasta = $request->input('vigente_hasta') ?: null;
+        $desde = RangoFechasService::fecha((string) $request->input('vigente_desde'));
+        $hastaTexto = (string) $request->input('vigente_hasta');
+        $hasta = $hastaTexto !== '' ? RangoFechasService::fecha($hastaTexto) : null;
+        if ($desde === null || ($hastaTexto !== '' && $hasta === null) || ($hasta !== null && $hasta < $desde)) {
+            Session::flash('error', 'Revisa las fechas: "Vigente hasta" no puede ser anterior a "Vigente desde".');
+            Response::redirect("/empleados/{$empleadoId}/horarios/crear");
+            return;
+        }
+
+        $vigenteDesde = $desde->format('Y-m-d');
+        $vigenteHasta = $hasta?->format('Y-m-d');
+
+        // Una vigencia se identifica por (empleado, vigente_desde): dos con la
+        // misma fecha de inicio se mezclarian en un solo grupo al editar o eliminar.
+        if (HorarioBaseModel::vigencia($empleadoId, $vigenteDesde)) {
+            Session::flash('error', "Ya existe una vigencia que empieza el {$vigenteDesde}. Editala desde la lista o elige otra fecha de inicio.");
+            Response::redirect("/empleados/{$empleadoId}/horarios/crear");
+            return;
+        }
+
         $comentario = $request->input('comentario') ?: null;
         $dias = $this->leerDiasDelFormulario($request);
 
@@ -112,7 +132,16 @@ class HorarioController
             Response::abort(404, 'Vigencia de horario no encontrada.');
         }
 
-        $vigenteHasta = $request->input('vigente_hasta') ?: null;
+        $hastaTexto = (string) $request->input('vigente_hasta');
+        $hasta = $hastaTexto !== '' ? RangoFechasService::fecha($hastaTexto) : null;
+        $desde = RangoFechasService::fecha($vigenteDesde);
+        if (($hastaTexto !== '' && $hasta === null) || ($hasta !== null && $desde !== null && $hasta < $desde)) {
+            Session::flash('error', 'Revisa la fecha: "Vigente hasta" no puede ser anterior a "Vigente desde".');
+            Response::redirect("/empleados/{$empleadoId}/horarios/{$vigenteDesde}/editar");
+            return;
+        }
+
+        $vigenteHasta = $hasta?->format('Y-m-d');
         $comentario = $request->input('comentario') ?: null;
         $dias = $this->leerDiasDelFormulario($request);
 

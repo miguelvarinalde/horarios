@@ -116,8 +116,9 @@ $router->post('/reportes/periodos/eliminar', [ReporteController::class, 'elimina
 $router->post('/reportes/horas-extra/calcular', [ReporteController::class, 'calcular'], [[RbacMiddleware::class, 'calculo.ejecutar']]);
 $router->get('/reportes/horas-extra/exportar-excel', [ReporteController::class, 'exportarExcel'], [[RbacMiddleware::class, 'reportes.exportar']]);
 $router->get('/reportes/horas-extra/exportar-pdf', [ReporteController::class, 'exportarPdf'], [[RbacMiddleware::class, 'reportes.exportar']]);
-$router->get('/reportes/horas-registro', [ReporteController::class, 'horasRegistro'], [[RbacMiddleware::class, 'reportes.ver']]);
-$router->get('/reportes/horas-registro/exportar-excel', [ReporteController::class, 'exportarHorasRegistroExcel'], [[RbacMiddleware::class, 'reportes.exportar']]);
+// Cada colaborador puede ver y exportar SUS horas (mes anterior y actual) con reportes.horas_propias.
+$router->get('/reportes/horas-registro', [ReporteController::class, 'horasRegistro'], [[RbacMiddleware::class, 'reportes.ver|reportes.horas_propias']]);
+$router->get('/reportes/horas-registro/exportar-excel', [ReporteController::class, 'exportarHorasRegistroExcel'], [[RbacMiddleware::class, 'reportes.exportar|reportes.horas_propias']]);
 $router->get('/reportes/nomina-registro', [ReporteController::class, 'nominaRegistro'], [[RbacMiddleware::class, 'reportes.ver']]);
 $router->get('/reportes/nomina-registro/exportar-excel', [ReporteController::class, 'exportarNominaRegistroExcel'], [[RbacMiddleware::class, 'reportes.exportar']]);
 

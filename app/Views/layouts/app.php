@@ -18,7 +18,7 @@ $sitio = ConfiguracionSitioModel::obtener();
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= View::e($titulo ?? $sitio['nombre_aplicacion']) ?></title>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="stylesheet" href="<?= \App\Core\View::asset('/assets/css/app.css') ?>">
 </head>
 <body>
 <div class="app-shell" id="app-shell">
@@ -39,6 +39,11 @@ $sitio = ConfiguracionSitioModel::obtener();
             <?php if ($puede('registros_tiempo.marcar')): ?>
                 <div class="grupo">Mi tiempo</div>
                 <a href="/registros-tiempo/marcar" class="<?= $activo('/registros-tiempo/marcar') ?>">Marcar entrada / salida</a>
+            <?php endif; ?>
+
+            <?php if ($puede('reportes.horas_propias') && !$puede('reportes.ver')): ?>
+                <?php if (!$puede('registros_tiempo.marcar')): ?><div class="grupo">Mi tiempo</div><?php endif; ?>
+                <a href="/reportes/horas-registro" class="<?= $activo('/reportes/horas-registro') ?>">Mis horas (registro)</a>
             <?php endif; ?>
 
             <?php if ($puede('empleados.ver')): ?>
@@ -146,6 +151,6 @@ $sitio = ConfiguracionSitioModel::obtener();
         <?php endif; ?>
     </div>
 </div>
-<script src="/assets/js/app.js"></script>
+<script src="<?= View::asset('/assets/js/app.js') ?>"></script>
 </body>
 </html>

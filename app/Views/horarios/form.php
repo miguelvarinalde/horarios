@@ -15,6 +15,20 @@ $hora5 = fn (?string $valor) => View::e($valor ? substr($valor, 0, 5) : '');
         : "/empleados/{$empleado['id']}/horarios" ?>">
         <input type="hidden" name="_csrf" value="<?= View::e(Session::csrfToken()) ?>">
 
+        <?php if (!$vigencia && !empty($atajos)): ?>
+            <div class="form-group">
+                <label>Rango rapido</label>
+                <div style="display:flex;flex-wrap:wrap;gap:.5rem">
+                    <?php foreach ($atajos as $a): ?>
+                        <button type="button" class="btn btn-sm" data-vigencia-desde="<?= View::e($a['desde']) ?>" data-vigencia-hasta="<?= View::e($a['hasta']) ?>" title="<?= View::e($a['desde']) ?> a <?= View::e($a['hasta']) ?>">
+                            <?= View::e($a['etiqueta']) ?>
+                        </button>
+                    <?php endforeach; ?>
+                </div>
+                <small class="text-muted">Llena "Vigente desde" y "Vigente hasta" con ese rango; despues del "hasta" vuelve a regir el horario anterior. Puedes ajustar las fechas a mano.</small>
+            </div>
+        <?php endif; ?>
+
         <div class="form-row">
             <div class="form-group">
                 <label>Vigente desde</label>

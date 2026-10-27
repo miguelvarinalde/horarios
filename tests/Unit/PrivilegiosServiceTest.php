@@ -117,6 +117,19 @@ class PrivilegiosServiceTest extends TestCase
         $this->assertContains($supervisor, $ids);
     }
 
+    public function test_los_roles_que_administran_empleados_incluyen_todo_lo_del_rol_empleado(): void
+    {
+        // Si Empleado recibe un permiso que RRHH/Administrador no tienen, ellos dejan de poder
+        // gestionar Empleados (resetear clave, correo, baja, crear cuentas). Cada permiso nuevo
+        // del rol Empleado debe concederse tambien a los demas roles.
+        $empleado = $this->permisosDe('Empleado');
+
+        foreach (['Administrador', 'RRHH'] as $rol) { // los que tienen usuarios.gestionar / empleados.crear
+            $faltan = array_diff($empleado, $this->permisosDe($rol));
+            $this->assertSame([], array_values($faltan), "El rol {$rol} no tiene permisos que si tiene Empleado: " . implode(', ', $faltan));
+        }
+    }
+
     public function test_un_rol_personalizado_con_un_permiso_extra_hereda_la_regla(): void
     {
         // Rol personalizado = permisos de RRHH + admin.roles: RRHH ya no puede asignarlo.

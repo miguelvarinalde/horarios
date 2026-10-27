@@ -148,6 +148,8 @@ class ReporteController
             'empleadoId' => $empleadoId,
             'desde' => $desde,
             'hasta' => $hasta,
+            'mesesRapidos' => RangoFechasService::mesesRapidos(),
+            'soloPropio' => $this->soloVeSusHoras(),
             'informe' => $informe,
             'columnas' => $columnas,
             'nombresPorCodigo' => $nombresPorCodigo,
@@ -156,6 +158,14 @@ class ReporteController
 
     public function exportarHorasRegistroExcel(Request $request)
     {
+        // reportes.horas_propias solo sustituye a reportes.exportar para quien ve UNICAMENTE
+        // sus propias horas (la ruta acepta ambos permisos): un rol con reportes.ver pero sin
+        // reportes.exportar no debe poder exportar por esta via.
+        if (!Auth::puede('reportes.exportar') && !$this->soloVeSusHoras()) {
+            Response::abort(403, 'No tienes permiso para exportar este informe.');
+            return;
+        }
+
         [, $empleadoId, $desde, $hasta, $empleadoNombre] = $this->resolverAlcanceHorasRegistro($request);
 
         $informe = $empleadoId ? (new ReporteHorasRegistroService())->generarInforme($empleadoId, $desde, $hasta) : [];
@@ -184,7 +194,11 @@ class ReporteController
         $usuario = Auth::usuario();
         $rol = $usuario['rol_nombre'] ?? '';
 
-        if ($rol === 'Empleado') {
+        // Quien entra solo por reportes.horas_propias (sin reportes.ver) ve unicamente
+        // SU ficha y solo el mes anterior y el actual.
+        $soloPropio = $this->soloVeSusHoras();
+
+        if ($soloPropio || $rol === 'Empleado') {
             $empleadoPropio = EmpleadoModel::porUsuario((int) $usuario['id']);
             $empleados = $empleadoPropio ? [$empleadoPropio] : [];
         } else {
@@ -203,7 +217,21 @@ class ReporteController
 
         [$desde, $hasta] = $this->rangoDeLaPeticion($request, date('Y-m-01'), date('Y-m-d'));
 
+        if ($soloPropio) {
+            [$minimo, $maximo] = RangoFechasService::ventanaMesAnteriorYActual();
+            if ($desde < $minimo || $hasta > $maximo) {
+                Session::flash('error', "Solo puedes consultar tus horas del mes anterior y del mes actual ({$minimo} a {$maximo}). Se muestra el mes actual.");
+                [$desde, $hasta] = [date('Y-m-01'), date('Y-m-d')];
+            }
+        }
+
         return [$empleados, $empleadoId, $desde, $hasta, $porId[$empleadoId] ?? null];
+    }
+
+    /** true si el usuario puede ver este informe unicamente por reportes.horas_propias (no tiene reportes.ver). */
+    private function soloVeSusHoras(): bool
+    {
+        return !Auth::puede('reportes.ver') && Auth::puede('reportes.horas_propias');
     }
 
     /**

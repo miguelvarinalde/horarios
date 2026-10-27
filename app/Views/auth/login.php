@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Iniciar sesion - <?= View::e($sitio['nombre_aplicacion']) ?></title>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="stylesheet" href="<?= \App\Core\View::asset('/assets/css/app.css') ?>">
 </head>
 <body>
 <div class="login-page">

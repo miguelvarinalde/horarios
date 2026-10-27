@@ -9,6 +9,7 @@
  *   <select data-autosubmit>                              -> envia su formulario al cambiar
  *   <input type="checkbox" data-toggle="idDelElemento">   -> muestra ese elemento si esta marcado, lo oculta si no
  *   <input type="checkbox" data-toggle-ocultar="idDelElemento"> -> oculta ese elemento si esta marcado, lo muestra si no
+ *   <button data-vigencia-desde="AAAA-MM-DD" data-vigencia-hasta="AAAA-MM-DD"> -> llena los campos vigente_desde / vigente_hasta de su formulario
  *   <button data-menu-toggle>                             -> abre/cierra el menu lateral (movil)
  *   <button data-menu-close> / <div data-menu-close>       -> cierra el menu lateral (movil)
  */
@@ -42,6 +43,18 @@ document.addEventListener('click', function (e) {
         var aOcultar = document.getElementById(el.getAttribute('data-toggle-ocultar'));
         if (aOcultar) {
             aOcultar.style.display = el.checked ? 'none' : 'block';
+        }
+    }
+
+    var atajo = el.closest ? el.closest('[data-vigencia-desde]') : null;
+    if (atajo && atajo.form) {
+        var campoDesde = atajo.form.elements['vigente_desde'];
+        var campoHasta = atajo.form.elements['vigente_hasta'];
+        if (campoDesde) {
+            campoDesde.value = atajo.getAttribute('data-vigencia-desde');
+        }
+        if (campoHasta) {
+            campoHasta.value = atajo.getAttribute('data-vigencia-hasta');
         }
     }
 

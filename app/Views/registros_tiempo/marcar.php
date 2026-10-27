@@ -89,5 +89,5 @@ $precisionBajaDesde = 150;
         </div>
     </div>
 
-    <script src="/assets/js/marcar-tiempo.js"></script>
+    <script src="<?= \App\Core\View::asset('/assets/js/marcar-tiempo.js') ?>"></script>
 <?php endif; ?>
