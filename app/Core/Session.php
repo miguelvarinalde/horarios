@@ -8,12 +8,17 @@ class Session
     {
         if (session_status() === PHP_SESSION_NONE) {
             $config = require dirname(__DIR__, 2) . '/config/app.php';
+            self::configurarAlmacenamiento($config);
             // Modo estricto: el servidor rechaza un id de sesion que el no
             // emitio (impide la fijacion de sesion con un id elegido por
             // un atacante). Solo cookies: nunca aceptar el id por URL.
             ini_set('session.use_strict_mode', '1');
             ini_set('session.use_only_cookies', '1');
-            session_name($config['session']['name']);
+            // Con https la cookie lleva el prefijo __Host-: el navegador solo la acepta si es
+            // Secure, de Path=/ y sin atributo Domain, asi que ningun subdominio (u otra app
+            // del mismo dominio) puede sobrescribirla o fijarla.
+            $nombre = $config['session']['name'];
+            session_name(SecurityHeaders::esHttps() ? '__Host-' . $nombre : $nombre);
             session_set_cookie_params([
                 'lifetime' => $config['session']['lifetime_minutes'] * 60,
                 'path' => '/',
@@ -23,6 +28,46 @@ class Session
             ]);
             session_start();
         }
+    }
+
+    /**
+     * Las sesiones se guardan en storage/sessions (fuera de public/, solo
+     * legibles por la aplicacion) en vez del directorio temporal compartido del
+     * hosting, y se conservan tanto como dure la sesion (el valor por defecto de
+     * PHP, 24 min, las borraba mucho antes que la cookie). Si no se puede crear
+     * la carpeta, se usa la configuracion por defecto de PHP.
+     */
+    private static function configurarAlmacenamiento(array $config): void
+    {
+        $minutos = max((int) $config['session']['lifetime_minutes'], (int) ($config['session']['idle_minutes'] ?? 0));
+        ini_set('session.gc_maxlifetime', (string) ($minutos * 60));
+
+        $dir = dirname(__DIR__, 2) . '/storage/sessions';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0700, true);
+        }
+        // is_writable() no es fiable en todas partes (en Windows/OneDrive da false en carpetas
+        // escribibles): se prueba escribiendo de verdad.
+        if (is_dir($dir) && self::sePuedeEscribirEn($dir)) {
+            if (!is_file($dir . '/.htaccess')) {
+                @file_put_contents($dir . '/.htaccess', "Require all denied\n");
+            }
+            session_save_path($dir);
+        }
+    }
+
+    private static function sePuedeEscribirEn(string $dir): bool
+    {
+        if (is_writable($dir)) {
+            return true; // caso normal (Linux): sin tocar el disco en cada peticion
+        }
+
+        $prueba = $dir . '/.prueba_' . bin2hex(random_bytes(4));
+        if (@file_put_contents($prueba, '1') === false) {
+            return false;
+        }
+        @unlink($prueba);
+        return true;
     }
 
     /**

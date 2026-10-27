@@ -13,6 +13,9 @@ use App\Services\Ms365AuthService;
 
 class AuthController
 {
+    /** bcrypt de una contrasena inexistente: se verifica contra el cuando no hay cuenta, para igualar el tiempo de respuesta. */
+    private const HASH_FICTICIO = '$2y$10$mfT/arY6gRDiGBGxW4Z54uFBVIo6SXpSW6DlnkvbUF4ENVvhlsinG';
+
     public function mostrarLogin(Request $request): string
     {
         if (Auth::check()) {
@@ -39,21 +42,30 @@ class AuthController
 
         $usuario = UsuarioModel::findByEmail($email);
 
+        // Mismo mensaje y mismo tiempo de respuesta exista o no el correo, este
+        // bloqueada o no la cuenta: asi no se puede averiguar quien tiene cuenta
+        // (ni por el texto, ni porque "correo inexistente" respondia mas rapido
+        // al saltarse la verificacion de contrasena).
+        $mensajeGenerico = 'Correo o contrasena incorrectos, o la cuenta esta bloqueada temporalmente por intentos fallidos. Intenta de nuevo en unos minutos.';
+
         // Se valida el bloqueo ANTES de verificar la contrasena (si ya esta
-        // bloqueado no tiene sentido gastar un password_verify, y ademas
+        // bloqueado no tiene sentido gastar un password_verify real, y ademas
         // evita reiniciar el conteo si alguien sigue intentando).
         if ($usuario && UsuarioModel::estaBloqueado($usuario)) {
-            Session::flash('error', 'Esta cuenta quedo bloqueada temporalmente por demasiados intentos fallidos. Intenta de nuevo en unos minutos.');
+            password_verify($password, self::HASH_FICTICIO);
+            Session::flash('error', $mensajeGenerico);
             Response::redirect('/login');
             return;
         }
 
-        if (!$usuario || !$usuario['activo'] || $usuario['password_hash'] === null
-            || !password_verify($password, $usuario['password_hash'])) {
+        $hash = ($usuario && $usuario['activo'] && $usuario['password_hash'] !== null) ? $usuario['password_hash'] : self::HASH_FICTICIO;
+        $correcta = password_verify($password, $hash);
+
+        if (!$usuario || !$usuario['activo'] || $usuario['password_hash'] === null || !$correcta) {
             if ($usuario) {
                 UsuarioModel::registrarIntentoFallido((int) $usuario['id']);
             }
-            Session::flash('error', 'Correo o contrasena incorrectos.');
+            Session::flash('error', $mensajeGenerico);
             Response::redirect('/login');
             return;
         }

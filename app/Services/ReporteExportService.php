@@ -102,7 +102,7 @@ class ReporteExportService
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="horas_extra_' . preg_replace('/[^a-z0-9_\-]/i', '_', $tituloPeriodo) . '.xlsx"');
-        header('Cache-Control: max-age=0');
+        header('Cache-Control: no-store, private');
 
         $writer = new Xlsx($spreadsheet);
         $writer->setPreCalculateFormulas(false);
@@ -178,7 +178,7 @@ class ReporteExportService
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="' . $nombreArchivo . '"');
-        header('Cache-Control: max-age=0');
+        header('Cache-Control: no-store, private');
 
         $writer = new Xlsx($spreadsheet);
         $writer->setPreCalculateFormulas(false);
@@ -234,7 +234,7 @@ class ReporteExportService
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="' . $nombreArchivo . '"');
-        header('Cache-Control: max-age=0');
+        header('Cache-Control: no-store, private');
 
         $writer = new Xlsx($spreadsheet);
         $writer->setPreCalculateFormulas(false);
@@ -278,7 +278,11 @@ class ReporteExportService
         $dompdf->setPaper('A4', 'landscape');
         $dompdf->render();
 
-        $dompdf->stream('horas_extra_' . preg_replace('/[^a-z0-9_\-]/i', '_', $tituloPeriodo) . '.pdf', ['Attachment' => true]);
+        // Se envia a mano (en vez de $dompdf->stream) para controlar la cache: contiene datos personales.
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="horas_extra_' . preg_replace('/[^a-z0-9_\-]/i', '_', $tituloPeriodo) . '.pdf"');
+        header('Cache-Control: no-store, private');
+        echo $dompdf->output();
         exit;
     }
 }

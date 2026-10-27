@@ -14,6 +14,7 @@ use App\Models\SupervisorAreaModel;
 use App\Models\UsuarioModel;
 use App\Services\AlcanceAreasService;
 use App\Services\CalendarioMs365Service;
+use App\Services\PoliticaPasswordService;
 use App\Services\PrivilegiosService;
 
 class EmpleadoController
@@ -62,6 +63,16 @@ class EmpleadoController
             Session::flash('error', 'No puedes crear una cuenta con ese rol: incluye permisos que tu rol no tiene. No se creo el empleado.');
             Response::redirect('/empleados/crear');
             return;
+        }
+
+        $passwordManual = trim((string) $request->input('password', ''));
+        if ($conCuenta && $passwordManual !== '') {
+            $problema = PoliticaPasswordService::validar($passwordManual, trim((string) $request->input('email')));
+            if ($problema !== null) {
+                Session::flash('error', $problema . ' No se creo el empleado.');
+                Response::redirect('/empleados/crear');
+                return;
+            }
         }
 
         $empleadoId = EmpleadoModel::insert([

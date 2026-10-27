@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Instalacion - Sistema de Horarios</title>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="stylesheet" href="<?= \App\Core\View::asset('/assets/css/app.css') ?>">
 </head>
 <body>
 <div class="login-page">
@@ -65,8 +65,8 @@
                 <input type="email" name="admin_email" value="<?= View::e($valores['adminEmail'] ?? '') ?>" required>
             </div>
             <div class="form-group">
-                <label>Contrasena (minimo 8 caracteres)</label>
-                <input type="password" name="admin_password" minlength="8" required>
+                <label>Contrasena (minimo 10 caracteres)</label>
+                <input type="password" name="admin_password" minlength="10" maxlength="72" required>
             </div>
 
             <button type="submit" class="btn btn-primary" style="width:100%;margin-top:.5rem">Instalar</button>

@@ -33,14 +33,71 @@ class Auth
 
         $usuario = self::usuario();
         if ($usuario === null || empty($usuario['activo'])) {
-            self::logout();
-            // Sesion nueva y vacia: si la misma peticion sigue hacia /login,
-            // su formulario necesita un token CSRF que se pueda guardar.
-            Session::start();
-            return false;
+            return self::cerrarSesionInvalida(null);
         }
 
+        // La contrasena cambio (la cambio el propio usuario o la reseteo RRHH/Administrador)
+        // desde que se abrio esta sesion: cualquier sesion anterior deja de servir.
+        $huella = self::huellaCredencial($usuario);
+        $guardada = Session::get('_cred');
+        if ($guardada === null) {
+            Session::put('_cred', $huella); // sesion abierta antes de esta mejora
+        } elseif (!hash_equals((string) $guardada, $huella)) {
+            return self::cerrarSesionInvalida('Tu contrasena cambio: inicia sesion de nuevo.');
+        }
+
+        $ahora = time();
+        $limite = self::minutosDeInactividad() * 60;
+        $ultima = Session::get('_actividad');
+        if ($limite > 0 && $ultima !== null && $ahora - (int) $ultima > $limite) {
+            return self::cerrarSesionInvalida('Tu sesion se cerro por inactividad. Inicia sesion de nuevo.');
+        }
+        Session::put('_actividad', $ahora);
+
         return true;
+    }
+
+    /** Cierra la sesion y deja una nueva y vacia (con el aviso opcional) para que /login funcione en esta misma peticion. */
+    private static function cerrarSesionInvalida(?string $aviso): bool
+    {
+        self::logout();
+        // Sesion nueva y vacia: si la misma peticion sigue hacia /login,
+        // su formulario necesita un token CSRF que se pueda guardar.
+        Session::start();
+        if ($aviso !== null) {
+            Session::flash('error', $aviso);
+        }
+        return false;
+    }
+
+    private static function minutosDeInactividad(): int
+    {
+        static $minutos = null;
+        if ($minutos === null) {
+            $config = require dirname(__DIR__, 2) . '/config/app.php';
+            $minutos = (int) ($config['session']['idle_minutes'] ?? 0);
+        }
+        return $minutos;
+    }
+
+    /** Huella del hash de contrasena vigente: cambia cuando cambia la contrasena. */
+    private static function huellaCredencial(array $usuario): string
+    {
+        return hash('sha256', (string) ($usuario['password_hash'] ?? ''));
+    }
+
+    /** Tras cambiar la contrasena del usuario en sesion, esta sesion sigue valida (las demas no). */
+    public static function actualizarHuellaCredencial(): void
+    {
+        $id = self::id();
+        if ($id === null) {
+            return;
+        }
+        $fresco = UsuarioModel::withRol((int) $id);
+        if ($fresco) {
+            self::$usuario = $fresco;
+            Session::put('_cred', self::huellaCredencial($fresco));
+        }
     }
 
     public static function usuario(): ?array
@@ -105,6 +162,8 @@ class Auth
     {
         Session::regenerar();
         Session::put('usuario_id', $usuario['id']);
+        Session::put('_cred', self::huellaCredencial($usuario));
+        Session::put('_actividad', time());
         self::$usuario = $usuario;
         self::$resuelto = true;
     }

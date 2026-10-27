@@ -11,12 +11,12 @@ $formulario = function () use ($error) { ?>
             <input type="password" id="password_actual" name="password_actual" required autofocus>
         </div>
         <div class="form-group">
-            <label for="password_nueva">Nueva contrasena (minimo 8 caracteres)</label>
-            <input type="password" id="password_nueva" name="password_nueva" minlength="8" required>
+            <label for="password_nueva">Nueva contrasena (minimo 10 caracteres, que no sea una palabra comun ni contenga tu correo)</label>
+            <input type="password" id="password_nueva" name="password_nueva" minlength="10" maxlength="72" required>
         </div>
         <div class="form-group">
             <label for="password_confirmacion">Confirmar nueva contrasena</label>
-            <input type="password" id="password_confirmacion" name="password_confirmacion" minlength="8" required>
+            <input type="password" id="password_confirmacion" name="password_confirmacion" minlength="10" maxlength="72" required>
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%">Cambiar contrasena</button>
     </form>
@@ -30,7 +30,7 @@ $formulario = function () use ($error) { ?>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cambiar contrasena - Sistema de Horarios</title>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="stylesheet" href="<?= \App\Core\View::asset('/assets/css/app.css') ?>">
 </head>
 <body>
 <div class="login-page">

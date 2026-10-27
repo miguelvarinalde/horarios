@@ -1,0 +1,3 @@
+# Aplicacion interna: no debe aparecer en buscadores.
+User-agent: *
+Disallow: /

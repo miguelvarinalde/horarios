@@ -1,5 +1,58 @@
 RewriteEngine On
 
+# --- HTTPS obligatorio ----------------------------------------------------
+# Llegando por http plano (p. ej. directo al origen, sin pasar por Cloudflare,
+# como hace el DNS interno de la Universidad) se redirige a https. Solo se
+# redirige si NADA indica que el visitante ya usa https: ni el servidor, ni
+# X-Forwarded-Proto, ni CF-Visitor de Cloudflare (con SSL "Flexible" el origen
+# siempre ve http y sin esta condicion habria un bucle de redireccion).
+# Limitado al dominio institucional para no afectar el desarrollo local.
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+RewriteCond %{HTTP:CF-Visitor} !"scheme":"https" [NC]
+RewriteCond %{HTTP_HOST} \.inalde\.edu\.co$ [NC]
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# --- Cabeceras de seguridad -------------------------------------------------
+# El hosting agrega sus propias cabeceras a TODA respuesta. Una de ellas,
+# Permissions-Policy con geolocation=(), llegaba DUPLICADA junto a la de la
+# aplicacion (geolocation=(self)) y el navegador aplicaba la ultima: el
+# marcado de entrada/salida con ubicacion quedaba bloqueado. Aqui se quitan
+# todas las copias y se deja una sola. (Los valores deben coincidir con
+# App\Core\SecurityHeaders; una prueba automatizada lo verifica.)
+<IfModule mod_headers.c>
+    Header unset Permissions-Policy
+    Header always unset Permissions-Policy
+    Header always set Permissions-Policy "geolocation=(self), camera=(), microphone=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), serial=(), hid=(), bluetooth=(), display-capture=()"
+
+    Header unset Referrer-Policy
+    Header always unset Referrer-Policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    Header unset X-Content-Type-Options
+    Header always unset X-Content-Type-Options
+    Header always set X-Content-Type-Options "nosniff"
+
+    Header unset X-Powered-By
+    Header always unset X-Powered-By
+
+    # Recursos estaticos versionados (?v=<fecha del archivo>, ver View::asset):
+    # si el archivo cambia, cambia la URL, asi que pueden cachearse por un anio.
+    <FilesMatch "\.(css|js|png|jpe?g|gif|webp|svg|ico|woff2?)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
+
+# --- Archivos que nunca deben servirse -------------------------------------
+# (Defensa en profundidad: public/ solo contiene index.php, assets y uploads.)
+<FilesMatch "\.(env|sql|md|lock|json|ya?ml|ini|log|bak|old|orig|sh|dist)$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "^\.(?!well-known)">
+    Require all denied
+</FilesMatch>
+
+# --- Enrutamiento ----------------------------------------------------------
 # Si el archivo o carpeta solicitado existe fisicamente (assets), servirlo directo
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d

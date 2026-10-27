@@ -8,6 +8,7 @@ use App\Core\Response;
 use App\Core\Session;
 use App\Core\View;
 use App\Models\UsuarioModel;
+use App\Services\PoliticaPasswordService;
 
 /**
  * Cambio de contrasena del propio usuario autenticado: se usa tanto de
@@ -50,8 +51,9 @@ class CambiarPasswordController
             return;
         }
 
-        if (strlen($nueva) < 8) {
-            Session::flash('error', 'La nueva contrasena debe tener al menos 8 caracteres.');
+        $problema = PoliticaPasswordService::validar($nueva, $usuario['email'] ?? null, $usuario['password_hash']);
+        if ($problema !== null) {
+            Session::flash('error', $problema);
             Response::redirect('/cambiar-password');
             return;
         }
@@ -63,6 +65,8 @@ class CambiarPasswordController
         }
 
         UsuarioModel::fijarPassword((int) $usuario['id'], $nueva, false);
+        // Las demas sesiones de esta cuenta (otros equipos, un tercero que la tuviera abierta) se cierran.
+        Auth::actualizarHuellaCredencial();
 
         Session::flash('success', 'Contrasena actualizada correctamente.');
         Response::redirect('/');

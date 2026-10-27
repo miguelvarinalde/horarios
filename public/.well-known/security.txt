@@ -1,0 +1,5 @@
+# Contacto para reportar vulnerabilidades del Sistema de Gestion de Horarios (INALDE Business School).
+Contact: mailto:helpdesk@inalde.edu.co
+Expires: 2027-10-27T00:00:00.000Z
+Preferred-Languages: es, en
+Canonical: https://horarios.inalde.edu.co/.well-known/security.txt

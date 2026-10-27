@@ -1,0 +1,6 @@
+/* Pagina de error generica (errors/generic.php). Antes era un bloque <style>
+   incrustado, que la politica CSP (style-src 'self') ya no permite. */
+body { font-family: system-ui, sans-serif; background: #f4f5f7; color: #1f2430; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.box { background: #fff; padding: 2rem 2.5rem; border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, .08); text-align: center; }
+h1 { font-size: 2.5rem; margin: 0 0 .5rem; color: #c0392b; }
+p { color: #555; }

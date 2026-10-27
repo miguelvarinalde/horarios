@@ -10,3 +10,4 @@ Thumbs.db
 .phpunit.result.cache
 /public/uploads/logo/*
 !/public/uploads/logo/.gitkeep
+/storage/sessions/

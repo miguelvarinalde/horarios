@@ -10,6 +10,7 @@ use App\Core\Response;
 use App\Core\Seeder;
 use App\Core\Session;
 use App\Core\View;
+use App\Services\PoliticaPasswordService;
 use PDO;
 use PDOException;
 
@@ -116,8 +117,9 @@ class InstalacionController
 
         $valoresParaReintentar = compact('dbHost', 'dbPort', 'dbDatabase', 'dbUsername', 'appUrl', 'adminNombre', 'adminEmail');
 
-        if (!$dbDatabase || !$dbUsername || !$appUrl || !$adminNombre || !$adminEmail || strlen($adminPassword) < 8) {
-            Session::flash('error', 'Completa todos los campos. La contrasena del Administrador debe tener al menos 8 caracteres.');
+        $problemaPassword = PoliticaPasswordService::validar($adminPassword, $adminEmail);
+        if (!$dbDatabase || !$dbUsername || !$appUrl || !$adminNombre || !$adminEmail || $problemaPassword !== null) {
+            Session::flash('error', 'Completa todos los campos. ' . ($problemaPassword ?? ''));
             Session::flash('valores', $valoresParaReintentar);
             Response::redirect('/instalar');
             return;

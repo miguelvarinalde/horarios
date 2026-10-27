@@ -12,5 +12,7 @@ return [
     'session' => [
         'name' => $_ENV['SESSION_NAME'] ?? 'horarios_session',
         'lifetime_minutes' => (int) ($_ENV['SESSION_LIFETIME'] ?? 480),
+        // Cierre por inactividad (minutos sin ninguna peticion). 0 = desactivado.
+        'idle_minutes' => (int) ($_ENV['SESSION_IDLE_MINUTES'] ?? 240),
     ],
 ];
