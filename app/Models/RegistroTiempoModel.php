@@ -62,7 +62,7 @@ class RegistroTiempoModel extends Model
      */
     public static function listarConFiltros(?array $empleadoIds, ?string $desde, ?string $hasta, int $limite = 300): array
     {
-        $sql = 'SELECT rt.*, e.nombre AS empleado_nombre
+        $sql = 'SELECT rt.*, e.nombre AS empleado_nombre, e.documento AS empleado_documento, e.cargo AS empleado_cargo
                 FROM registros_tiempo rt
                 JOIN empleados e ON e.id = rt.empleado_id
                 WHERE 1=1';

@@ -30,11 +30,13 @@ $precisionBajaDesde = 150;
 
     <div class="table-responsive">
     <table>
-        <thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha y hora (servidor)</th><th>Precision</th><th>Ubicacion</th><th>Observaciones</th><?php if (Auth::puede('registros_tiempo.corregir')): ?><th></th><?php endif; ?></tr></thead>
+        <thead><tr><th>Empleado</th><th>Identificacion</th><th>Cargo</th><th>Tipo</th><th>Fecha y hora (servidor)</th><th>Precision</th><th>Ubicacion</th><th>Observaciones</th><?php if (Auth::puede('registros_tiempo.corregir')): ?><th></th><?php endif; ?></tr></thead>
         <tbody>
         <?php foreach ($registros as $r): ?>
             <tr>
                 <td><?= View::e($r['empleado_nombre']) ?></td>
+                <td><?= View::e($r['empleado_documento']) ?></td>
+                <td><?= $r['empleado_cargo'] ? View::e($r['empleado_cargo']) : '<span class="text-muted">&mdash;</span>' ?></td>
                 <td><?= $r['tipo'] === 'entrada' ? '<span class="badge badge-aprobado">Entrada</span>' : '<span class="badge badge-pendiente">Salida</span>' ?></td>
                 <td><?= View::e($r['fecha_hora']) ?></td>
                 <td>
@@ -67,7 +69,7 @@ $precisionBajaDesde = 150;
             </tr>
         <?php endforeach; ?>
         <?php if (empty($registros)): ?>
-            <tr><td colspan="7" class="text-muted">No hay registros para los filtros seleccionados.</td></tr>
+            <tr><td colspan="<?= Auth::puede('registros_tiempo.corregir') ? 9 : 8 ?>" class="text-muted">No hay registros para los filtros seleccionados.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>
