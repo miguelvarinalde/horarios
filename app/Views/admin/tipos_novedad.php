@@ -50,6 +50,7 @@
                 <option value="ausencia">Ausencia</option>
                 <option value="festivo_trabajado">Festivo trabajado</option>
                 <option value="descanso_compensatorio">Descanso compensatorio</option>
+                <option value="almuerzo_no_tomado">Almuerzo no tomado (no descuenta la hora de almuerzo)</option>
             </select>
         </div>
         <div class="form-row">

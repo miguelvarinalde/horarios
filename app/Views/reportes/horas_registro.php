@@ -1,4 +1,11 @@
-<?php use App\Core\Auth; use App\Core\View; ?>
+<?php
+use App\Core\Auth;
+use App\Core\View;
+
+// Bloque de redondeo vigente (configuracion_global.redondeo_minutos) para los textos de ayuda.
+$redondeoMin = (int) ($informe[0]['redondeo_minutos'] ?? 15);
+$bloqueRedondeo = $redondeoMin > 0 ? "al bloque de {$redondeoMin} min mas cercano" : 'sin redondeo';
+?>
 <div class="card">
     <h2>Horas trabajadas segun registro (dia por dia)</h2>
     <p class="text-muted">
@@ -57,14 +64,15 @@
                 <th>Fecha</th>
                 <th>Estado</th>
                 <th>Marcaciones</th>
-                <th title="Primera entrada del dia. Debajo, redondeada al bloque de 30 min mas cercano.">Entrada</th>
-                <th title="Ultima salida del dia (o la estimada, si el dia se cerro automatico). Debajo, redondeada al bloque de 30 min mas cercano.">Salida</th>
+                <th title="Primera entrada del dia. Debajo, redondeada <?= View::e($bloqueRedondeo) ?> (en un empate la entrada baja).">Entrada</th>
+                <th title="Ultima salida del dia (o la estimada, si el dia se cerro automatico). Debajo, redondeada <?= View::e($bloqueRedondeo) ?> (en un empate la salida sube).">Salida</th>
                 <th title="Novedades (permisos, incapacidades, etc.) registradas ese dia, con su estado y motivo, sin importar si afectaron o no las horas calculadas.">Permiso / Novedad</th>
                 <?php foreach ($columnas as $c): ?>
-                    <th title="<?= View::e($nombresPorCodigo[$c] ?? $c) ?>. Debajo, redondeado al bloque de 30 min mas cercano."><?= View::e($c) ?></th>
+                    <th title="<?= View::e($nombresPorCodigo[$c] ?? $c) ?>. Debajo, redondeado <?= View::e($bloqueRedondeo) ?>."><?= View::e($c) ?></th>
                 <?php endforeach; ?>
                 <th>Total</th>
-                <th title="Suma de los segmentos trabajados con la entrada y la salida de cada uno redondeadas al bloque de 30 min mas cercano.">Total redondeado</th>
+                <th title="Suma de los segmentos trabajados con la entrada y la salida de cada uno redondeadas <?= View::e($bloqueRedondeo) ?>.">Total redondeado</th>
+                <th title="Horas de almuerzo que se descontaron automaticamente ese dia. Si el colaborador no almorzo, registra una novedad 'Almuerzo no tomado' y, una vez aprobada, deja de descontarse.">Almuerzo</th>
             </tr>
             </thead>
             <tbody>
@@ -75,6 +83,9 @@
                         <?php if ($dia['es_domingo_o_festivo']): ?>
                             <span class="badge badge-pendiente">Dom/Festivo</span>
                         <?php endif; ?>
+                        <?php foreach ($dia['alertas'] ?? [] as $alerta): ?>
+                            <br><span class="badge badge-rechazado" title="<?= View::e($alerta) ?>">Limite de horas extra</span>
+                        <?php endforeach; ?>
                     </td>
                     <td>
                         <?php if ($dia['estado'] === 'completo'): ?>
@@ -156,10 +167,19 @@
                     <?php endforeach; ?>
                     <td><strong><?= in_array($dia['estado'], ['completo', 'cerrado_automatico', 'en_curso'], true) ? number_format($dia['horas_totales'], 2) : '&mdash;' ?></strong></td>
                     <td><?= $dia['horas_totales_redondeadas'] !== null ? number_format($dia['horas_totales_redondeadas'], 2) : '&mdash;' ?></td>
+                    <td>
+                        <?php if (!empty($dia['almuerzo_no_tomado'])): ?>
+                            <span class="badge badge-aprobado" title="Hay una novedad 'Almuerzo no tomado' aprobada: no se descuenta.">No tomado</span>
+                        <?php elseif (($dia['almuerzo_descontado_horas'] ?? 0) > 0): ?>
+                            &minus;<?= number_format($dia['almuerzo_descontado_horas'], 2) ?> h
+                        <?php else: ?>
+                            <span class="text-muted">&mdash;</span>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
             <?php if (empty($informe)): ?>
-                <tr><td colspan="<?= count($columnas) + 8 ?>" class="text-muted">Sin datos para el rango seleccionado.</td></tr>
+                <tr><td colspan="<?= count($columnas) + 9 ?>" class="text-muted">Sin datos para el rango seleccionado.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>

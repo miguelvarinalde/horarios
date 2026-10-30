@@ -222,9 +222,26 @@ class AdminConfigController
             return;
         }
 
+        // Tope de horas ordinarias por dia (vacio = sin tope diario, solo cuenta la semana).
+        $jornadaDiaria = trim((string) $request->input('jornada_diaria_maxima_horas'));
+        if ($jornadaDiaria !== '' && (!is_numeric($jornadaDiaria) || (float) $jornadaDiaria < 1 || (float) $jornadaDiaria > 24)) {
+            Session::flash('error', 'La jornada diaria maxima debe ser un numero de horas entre 1 y 24 (o dejarse vacia para no aplicar tope diario).');
+            Response::redirect('/admin/configuracion');
+            return;
+        }
+
+        $redondeoMinutos = (string) $request->input('redondeo_minutos');
+        if (!in_array($redondeoMinutos, ['0', '5', '10', '15', '20', '30'], true)) {
+            Session::flash('error', 'El redondeo debe ser de 0 (sin redondeo), 5, 10, 15, 20 o 30 minutos.');
+            Response::redirect('/admin/configuracion');
+            return;
+        }
+
         ConfiguracionGlobalModel::insert([
             'vigente_desde' => $request->input('vigente_desde'),
             'jornada_semanal_horas' => $request->input('jornada_semanal_horas'),
+            'jornada_diaria_maxima_horas' => $jornadaDiaria === '' ? null : $jornadaDiaria,
+            'redondeo_minutos' => (int) $redondeoMinutos,
             'hora_inicio_recargo_nocturno' => $request->input('hora_inicio_recargo_nocturno'),
             'hora_fin_recargo_nocturno' => $request->input('hora_fin_recargo_nocturno'),
             'almuerzo_activo' => $almuerzoActivo ? 1 : 0,
@@ -399,7 +416,7 @@ class AdminConfigController
         TipoNovedadModel::insert([
             'codigo' => strtoupper(str_replace(' ', '_', trim((string) $request->input('codigo')))),
             'nombre' => trim((string) $request->input('nombre')),
-            'categoria' => $request->input('categoria'),
+            'categoria' => in_array($request->input('categoria'), TipoNovedadModel::CATEGORIAS, true) ? $request->input('categoria') : 'permiso',
             'requiere_aprobacion' => $request->input('requiere_aprobacion') ? 1 : 0,
             'afecta_pago' => $request->input('afecta_pago') ? 1 : 0,
             'activo' => 1,

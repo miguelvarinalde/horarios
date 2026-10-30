@@ -7,4 +7,5 @@ INSERT IGNORE INTO tipos_novedad (codigo, nombre, categoria, requiere_aprobacion
     ('HORA_EXTRA', 'Horas extra trabajadas', 'hora_extra', 1, 1),
     ('FESTIVO_TRABAJADO', 'Trabajo en dia festivo/dominical', 'festivo_trabajado', 1, 1),
     ('AUSENCIA_INJUSTIFICADA', 'Ausencia injustificada', 'ausencia', 0, 1),
-    ('DESCANSO_COMPENSATORIO', 'Dia de descanso compensatorio (por trabajo dominical/festivo)', 'descanso_compensatorio', 1, 1);
+    ('DESCANSO_COMPENSATORIO', 'Dia de descanso compensatorio (por trabajo dominical/festivo)', 'descanso_compensatorio', 1, 1),
+    ('ALMUERZO_NO_TOMADO', 'Almuerzo no tomado (no se descuenta la hora de almuerzo)', 'almuerzo_no_tomado', 1, 1);

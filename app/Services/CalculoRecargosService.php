@@ -35,7 +35,11 @@ use RuntimeException;
  *  4. Los sub-segmentos que vienen del horario base (no de una novedad de
  *     hora_extra, que ya es extra por definicion) se reparten entre horas
  *     ordinarias y horas extra segun el acumulado semanal contra la
- *     jornada_semanal_horas vigente.
+ *     jornada_semanal_horas vigente y, si la vigencia lo define, contra el
+ *     tope de horas ordinarias por dia (jornada_diaria_maxima_horas, jornada
+ *     flexible de hasta 9 h): lo que supere ese tope en un mismo dia es
+ *     extra aunque la semana no haya llegado al limite (2026-10-30). Con
+ *     tope diario solo las horas ordinarias consumen la capacidad semanal.
  *  5. Cada porcion final (horas, es_extra, es_nocturno, es_dominical_festivo)
  *     se empareja con la fila de tipos_recargo cuyos flags coincidan y
  *     vigente en esa fecha, y se persiste en calculo_detalle.
@@ -80,11 +84,18 @@ use RuntimeException;
  * fija en codigo, para que se ajuste solo si esa configuracion cambia. Si
  * SI se cumple el umbral, la ventana descontada sigue siendo exactamente
  * la configurada (no se descuenta el margen de los 30 min extra).
+ *
+ * Almuerzo no tomado (2026-10-30): una novedad APROBADA de categoria
+ * 'almuerzo_no_tomado' ese dia evita el descuento automatico (el sistema no
+ * puede saber por si solo que el colaborador trabajo de corrido).
  */
 class CalculoRecargosService
 {
     private const CATEGORIAS_SUSPENSIVAS = ['permiso', 'vacaciones', 'incapacidad', 'ausencia', 'descanso_compensatorio'];
     private const CATEGORIAS_ADITIVAS = ['hora_extra', 'festivo_trabajado'];
+
+    /** Una novedad aprobada de esta categoria evita el descuento automatico de almuerzo de ese dia. */
+    private const CATEGORIA_ALMUERZO_NO_TOMADO = 'almuerzo_no_tomado';
 
     /** Minutos de margen que debe superar la salida despues del fin de almuerzo configurado para que se aplique el descuento (ver docblock de la clase). */
     private const UMBRAL_MINIMO_ALMUERZO_MINUTOS = 30;
@@ -146,6 +157,11 @@ class CalculoRecargosService
                 throw new RuntimeException("No hay configuracion_global vigente para la fecha {$fecha}.");
             }
             $jornadaSemanal = (float) $config['jornada_semanal_horas'];
+            // Tope de horas ordinarias por dia (null = sin tope diario, solo cuenta la semana).
+            $jornadaDiaria = (isset($config['jornada_diaria_maxima_horas']) && (float) $config['jornada_diaria_maxima_horas'] > 0)
+                ? (float) $config['jornada_diaria_maxima_horas']
+                : null;
+            $acumuladoDia = 0.0;
             $inicioNocturno = $this->normalizar($config['hora_inicio_recargo_nocturno']);
             $finNocturno = $this->normalizar($config['hora_fin_recargo_nocturno']);
 
@@ -178,8 +194,16 @@ class CalculoRecargosService
                     if ($segmento['extra_forzado']) {
                         $partes = [['horas' => $sub['horas'], 'es_extra' => true]];
                     } else {
-                        $partes = $this->repartirPorAcumuladoSemanal($sub['horas'], $acumuladoSemanal, $jornadaSemanal);
-                        $acumuladoSemanal += $sub['horas'];
+                        $partes = $this->repartirPorAcumulados($sub['horas'], $acumuladoSemanal, $jornadaSemanal, $acumuladoDia, $jornadaDiaria);
+                        $horasOrdinarias = 0.0;
+                        foreach ($partes as $parte) {
+                            if (!$parte['es_extra']) {
+                                $horasOrdinarias += $parte['horas'];
+                            }
+                        }
+                        // Sin tope diario (vigencias anteriores): toda hora suma a la semana, como antes.
+                        $acumuladoSemanal += $jornadaDiaria === null ? $sub['horas'] : $horasOrdinarias;
+                        $acumuladoDia += $horasOrdinarias;
                     }
 
                     foreach ($partes as $parte) {
@@ -279,7 +303,7 @@ class CalculoRecargosService
             // ejemplo) SI cubre la ventana completa por si solo — ese
             // bloque especifico si debe descontar, sin importar cuantos
             // otros bloques tenga el dia.
-            if (!empty($config['almuerzo_activo'])) {
+            if (!empty($config['almuerzo_activo']) && !$this->tieneAlmuerzoNoTomado($novedadesDelDia)) {
                 $segmentosConAlmuerzo = [];
                 foreach ($segmentosHorario as $segmento) {
                     $segmentosConAlmuerzo = array_merge($segmentosConAlmuerzo, $this->descontarAlmuerzo($segmento, $config));
@@ -497,10 +521,30 @@ class CalculoRecargosService
         return $t >= $inicioNocturno && $t < $finNocturno;
     }
 
-    /** @return array<int, array{horas:float, es_extra:bool}> */
-    private function repartirPorAcumuladoSemanal(float $horas, float $acumulado, float $jornadaSemanal): array
+    /** true si hay una novedad APROBADA de la categoria "almuerzo no tomado" ese dia. */
+    private function tieneAlmuerzoNoTomado(array $novedadesDelDia): bool
     {
-        $capacidadRestante = max(0.0, $jornadaSemanal - $acumulado);
+        foreach ($novedadesDelDia as $n) {
+            if (($n['categoria'] ?? null) === self::CATEGORIA_ALMUERZO_NO_TOMADO) {
+                return true; // $novedadesDelDia ya viene filtrada a aprobadas (NovedadModel::aprobadasEnFecha)
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Reparte las horas entre ordinarias y extra segun la capacidad que le
+     * queda a la semana y, si hay tope diario, al dia: la capacidad es la
+     * menor de las dos.
+     *
+     * @return array<int, array{horas:float, es_extra:bool}>
+     */
+    private function repartirPorAcumulados(float $horas, float $acumuladoSemanal, float $jornadaSemanal, float $acumuladoDia, ?float $jornadaDiaria): array
+    {
+        $capacidadRestante = max(0.0, $jornadaSemanal - $acumuladoSemanal);
+        if ($jornadaDiaria !== null) {
+            $capacidadRestante = min($capacidadRestante, max(0.0, $jornadaDiaria - $acumuladoDia));
+        }
 
         if ($capacidadRestante >= $horas) {
             return [['horas' => $horas, 'es_extra' => false]];

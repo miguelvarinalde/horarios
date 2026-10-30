@@ -7,6 +7,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Session;
 use App\Core\View;
+use App\Models\AreaModel;
 use App\Models\CalculoDetalleModel;
 use App\Models\EmpleadoModel;
 use App\Models\PeriodoCalculoModel;
@@ -166,10 +167,24 @@ class ReporteController
             return;
         }
 
-        [, $empleadoId, $desde, $hasta, $empleadoNombre] = $this->resolverAlcanceHorasRegistro($request);
+        [$empleados, $empleadoId, $desde, $hasta, $empleadoNombre] = $this->resolverAlcanceHorasRegistro($request);
 
         $informe = $empleadoId ? (new ReporteHorasRegistroService())->generarInforme($empleadoId, $desde, $hasta) : [];
         [$informe, $columnas, $nombresPorCodigo] = $this->reorganizarPorColumnasDeRecargo($informe);
+
+        // La ficha sale de la lista ya filtrada por alcance, asi que no se exponen datos de
+        // empleados fuera de lo que el usuario puede consultar.
+        $empleado = [];
+        foreach ($empleados as $e) {
+            if ((int) $e['id'] === $empleadoId) {
+                $empleado = $e;
+                break;
+            }
+        }
+        if ($empleado && empty($empleado['area_nombre']) && !empty($empleado['area_id'])) {
+            $area = AreaModel::find((int) $empleado['area_id']);
+            $empleado['area_nombre'] = $area['nombre'] ?? '';
+        }
 
         (new ReporteExportService())->generarExcelHorasRegistro(
             $informe,
@@ -177,7 +192,8 @@ class ReporteController
             $nombresPorCodigo,
             $empleadoNombre ?? "empleado_{$empleadoId}",
             $desde,
-            $hasta
+            $hasta,
+            $empleado
         );
     }
 

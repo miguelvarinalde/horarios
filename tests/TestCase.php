@@ -226,15 +226,19 @@ abstract class TestCase extends BaseTestCase
         string $inicioNocturno = '21:00:00',
         string $finNocturno = '06:00:00',
         ?string $inicioAlmuerzo = null,
-        ?string $finAlmuerzo = null
+        ?string $finAlmuerzo = null,
+        ?float $jornadaDiariaMaxima = null,
+        int $redondeoMinutos = 30
     ): int {
         $stmt = $this->db->prepare(
-            'INSERT INTO configuracion_global (vigente_desde, jornada_semanal_horas, hora_inicio_recargo_nocturno, hora_fin_recargo_nocturno, almuerzo_activo, hora_inicio_almuerzo, hora_fin_almuerzo, notas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO configuracion_global (vigente_desde, jornada_semanal_horas, jornada_diaria_maxima_horas, redondeo_minutos, hora_inicio_recargo_nocturno, hora_fin_recargo_nocturno, almuerzo_activo, hora_inicio_almuerzo, hora_fin_almuerzo, notas)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $vigenteDesde,
             $jornadaSemanal,
+            $jornadaDiariaMaxima,
+            $redondeoMinutos,
             $inicioNocturno,
             $finNocturno,
             $inicioAlmuerzo !== null ? 1 : 0,

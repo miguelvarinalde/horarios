@@ -13,6 +13,22 @@ $hora5 = fn (?string $valor, string $porDefecto) => View::e($valor ? substr($val
     <?php if ($actual): ?>
         <ul>
             <li>Jornada semanal: <strong><?= View::e((string) $actual['jornada_semanal_horas']) ?> horas</strong></li>
+            <li>
+                Tope de horas ordinarias por dia:
+                <?php if (!empty($actual['jornada_diaria_maxima_horas'])): ?>
+                    <strong><?= View::e((string) (float) $actual['jornada_diaria_maxima_horas']) ?> horas</strong> (lo que pase de ahi en un mismo dia es hora extra)
+                <?php else: ?>
+                    <span class="text-muted">Sin tope diario (solo cuenta la semana)</span>
+                <?php endif; ?>
+            </li>
+            <li>
+                Redondeo de marcaciones (informes por registro):
+                <?php if ((int) ($actual['redondeo_minutos'] ?? 0) > 0): ?>
+                    <strong>a <?= (int) $actual['redondeo_minutos'] ?> minutos</strong>
+                <?php else: ?>
+                    <span class="text-muted">Sin redondeo</span>
+                <?php endif; ?>
+            </li>
             <li>Recargo nocturno desde las <strong><?= View::e($actual['hora_inicio_recargo_nocturno']) ?></strong> hasta las <strong><?= View::e($actual['hora_fin_recargo_nocturno']) ?></strong></li>
             <li>
                 Descuento automatico de almuerzo:
@@ -42,6 +58,23 @@ $hora5 = fn (?string $valor, string $porDefecto) => View::e($valor ? substr($val
             <div class="form-group">
                 <label>Jornada semanal (horas)</label>
                 <input type="number" step="0.01" name="jornada_semanal_horas" required value="<?= View::e((string) ($actual['jornada_semanal_horas'] ?? '42.00')) ?>">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Tope de horas ordinarias por dia</label>
+                <input type="number" step="0.25" min="1" max="24" name="jornada_diaria_maxima_horas" placeholder="Vacio = sin tope diario" value="<?= View::e(isset($actual['jornada_diaria_maxima_horas']) && $actual['jornada_diaria_maxima_horas'] !== null ? (string) (float) $actual['jornada_diaria_maxima_horas'] : '9') ?>">
+                <small class="text-muted">Jornada flexible: hasta 9 horas ordinarias por dia sin recargo, siempre que la semana no pase de la jornada semanal. Las horas que superen este tope en un mismo dia se pagan como extra.</small>
+            </div>
+            <div class="form-group">
+                <label>Redondeo de marcaciones</label>
+                <?php $redondeoActual = (string) ($actual['redondeo_minutos'] ?? 15); ?>
+                <select name="redondeo_minutos">
+                    <?php foreach (['0' => 'Sin redondeo', '5' => '5 minutos', '10' => '10 minutos', '15' => '15 minutos', '20' => '20 minutos', '30' => '30 minutos'] as $valor => $etiqueta): ?>
+                        <option value="<?= $valor ?>" <?= $redondeoActual === (string) $valor ? 'selected' : '' ?>><?= $etiqueta ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted">Cada entrada y salida se lleva al multiplo mas cercano; en un empate exacto la entrada baja y la salida sube (a favor del colaborador). Solo afecta las columnas "redondeado" de Horas trabajadas segun registro.</small>
             </div>
         </div>
         <div class="form-row">
@@ -83,12 +116,14 @@ $hora5 = fn (?string $valor, string $porDefecto) => View::e($valor ? substr($val
     <h2>Historial</h2>
     <div class="table-responsive">
     <table>
-        <thead><tr><th>Vigente desde</th><th>Jornada</th><th>Recargo nocturno</th><th>Almuerzo</th><th>Notas</th></tr></thead>
+        <thead><tr><th>Vigente desde</th><th>Jornada</th><th>Tope diario</th><th>Redondeo</th><th>Recargo nocturno</th><th>Almuerzo</th><th>Notas</th></tr></thead>
         <tbody>
         <?php foreach ($historial as $h): ?>
             <tr>
                 <td><?= View::e($h['vigente_desde']) ?></td>
                 <td><?= View::e((string) $h['jornada_semanal_horas']) ?>h</td>
+                <td><?= !empty($h['jornada_diaria_maxima_horas']) ? View::e((string) (float) $h['jornada_diaria_maxima_horas']) . 'h' : '<span class="text-muted">&mdash;</span>' ?></td>
+                <td><?= (int) ($h['redondeo_minutos'] ?? 0) > 0 ? (int) $h['redondeo_minutos'] . ' min' : '<span class="text-muted">Sin redondeo</span>' ?></td>
                 <td><?= View::e($h['hora_inicio_recargo_nocturno']) ?> - <?= View::e($h['hora_fin_recargo_nocturno']) ?></td>
                 <td><?= !empty($h['almuerzo_activo']) ? View::e($h['hora_inicio_almuerzo']) . ' - ' . View::e($h['hora_fin_almuerzo']) : '<span class="text-muted">Inactivo</span>' ?></td>
                 <td><?= View::e($h['notas']) ?></td>

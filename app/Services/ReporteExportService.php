@@ -114,35 +114,60 @@ class ReporteExportService
      * Informe dia por dia de un solo empleado (Horas trabajadas segun registro), con una
      * columna independiente por cada tipo de recargo que aparezca en el rango.
      *
-     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, novedades:array, marcaciones:array, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
+     * @param array<int, array{fecha:string, es_domingo_o_festivo:bool, estado:string, nota:?string, primera_entrada:?string, ultima_salida:?string, primera_entrada_redondeada:?string, ultima_salida_redondeada:?string, horas_totales:float, horas_totales_redondeadas:?float, almuerzo_descontado_horas:float, almuerzo_no_tomado:bool, alertas:string[], novedades:array, marcaciones:array, recargos: array<string,float>, recargos_redondeados: array<string,float>}> $filas
      * @param string[] $columnas codigos de tipo_recargo, en el orden en que deben mostrarse
      * @param array<string,string> $nombresPorCodigo codigo => nombre completo del tipo de recargo
+     * @param array{nombre?:?string, documento?:?string, cargo?:?string, area_nombre?:?string} $empleado datos del empleado que se imprimen sobre la tabla
      */
-    public function generarExcelHorasRegistro(array $filas, array $columnas, array $nombresPorCodigo, string $empleadoNombre, string $desde, string $hasta): void
+    public function generarExcelHorasRegistro(array $filas, array $columnas, array $nombresPorCodigo, string $empleadoNombre, string $desde, string $hasta, array $empleado = []): void
     {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Horas segun registro');
 
-        $col = 1;
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Fecha');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Dom/Festivo');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Estado');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Entrada');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Entrada redondeada');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Salida redondeada');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Permiso / Novedad');
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Comentario de marcacion');
-        foreach ($columnas as $codigo) {
-            $sheet->setCellValueByColumnAndRow($col++, 1, $nombresPorCodigo[$codigo] ?? $codigo);
-            $sheet->setCellValueByColumnAndRow($col++, 1, ($nombresPorCodigo[$codigo] ?? $codigo) . ' (redondeado)');
+        // Bloque de datos del empleado (filas 1-5, una fila en blanco y la tabla desde la 7).
+        // Todo se escribe como texto explicito: el documento no debe perder ceros a la izquierda
+        // ni convertirse en notacion cientifica, y ningun dato debe interpretarse como formula.
+        $datosEmpleado = [
+            'Empleado' => $empleado['nombre'] ?? $empleadoNombre,
+            'Identificacion' => $empleado['documento'] ?? '',
+            'Cargo' => $empleado['cargo'] ?? '',
+            'Area' => $empleado['area_nombre'] ?? '',
+            'Periodo' => "{$desde} a {$hasta}",
+        ];
+        $filaDato = 1;
+        foreach ($datosEmpleado as $etiqueta => $valor) {
+            $this->escribirTexto($sheet, 1, $filaDato, $etiqueta);
+            $sheet->getStyleByColumnAndRow(1, $filaDato)->getFont()->setBold(true);
+            $this->escribirTexto($sheet, 2, $filaDato, (string) $valor);
+            $sheet->getStyleByColumnAndRow(2, $filaDato)->getAlignment()->setHorizontal('left');
+            $filaDato++;
         }
-        $sheet->setCellValueByColumnAndRow($col++, 1, 'Total horas');
-        $sheet->setCellValueByColumnAndRow($col, 1, 'Total redondeado');
-        $ultimaColumna = $col;
+        $filaEncabezado = $filaDato + 1;
 
-        $fila = 2;
+        $col = 1;
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Fecha');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Dom/Festivo');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Estado');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Entrada');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Entrada redondeada');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Salida');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Salida redondeada');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Permiso / Novedad');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Comentario de marcacion');
+        foreach ($columnas as $codigo) {
+            $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, $nombresPorCodigo[$codigo] ?? $codigo);
+            $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, ($nombresPorCodigo[$codigo] ?? $codigo) . ' (redondeado)');
+        }
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Total horas');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Total redondeado');
+        $sheet->setCellValueByColumnAndRow($col++, $filaEncabezado, 'Almuerzo descontado (h)');
+        $sheet->setCellValueByColumnAndRow($col, $filaEncabezado, 'Alertas');
+        $ultimaColumna = $col;
+        $sheet->getStyle([1, $filaEncabezado, $ultimaColumna, $filaEncabezado])->getFont()->setBold(true);
+        $sheet->freezePane('A' . ($filaEncabezado + 1));
+
+        $fila = $filaEncabezado + 1;
         foreach ($filas as $dia) {
             $col = 1;
             $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['fecha']);
@@ -166,7 +191,14 @@ class ReporteExportService
                 $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['recargos_redondeados'][$codigo] ?? 0);
             }
             $sheet->setCellValueByColumnAndRow($col++, $fila, in_array($dia['estado'], ['completo', 'cerrado_automatico', 'en_curso'], true) ? $dia['horas_totales'] : 0);
-            $sheet->setCellValueByColumnAndRow($col, $fila, $dia['horas_totales_redondeadas'] ?? 0);
+            $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['horas_totales_redondeadas'] ?? 0);
+            // Almuerzo: horas descontadas ese dia, o la marca de que no se tomo (novedad aprobada).
+            if (!empty($dia['almuerzo_no_tomado'])) {
+                $this->escribirTexto($sheet, $col++, $fila, 'No tomado (novedad aprobada)');
+            } else {
+                $sheet->setCellValueByColumnAndRow($col++, $fila, $dia['almuerzo_descontado_horas'] ?? 0);
+            }
+            $this->escribirTexto($sheet, $col, $fila, implode(' | ', $dia['alertas'] ?? []));
             $fila++;
         }
 

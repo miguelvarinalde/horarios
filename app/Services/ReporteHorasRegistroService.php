@@ -110,11 +110,21 @@ use DateTimeImmutable;
  * UMBRAL_MINIMO_ALMUERZO_MINUTOS despues del fin de almuerzo configurado
  * para que aplique el descuento — ver descontarAlmuerzo().
  *
+ * Tope diario y almuerzo no tomado (2026-10-30): el reparto
+ * ordinaria/extra respeta, ademas de la jornada semanal, el tope de horas
+ * ordinarias por dia de configuracion_global (jornada flexible, hoy 9 h) — ver
+ * clasificarSegmentos() —, y una novedad aprobada "Almuerzo no tomado"
+ * evita el descuento automatico de almuerzo de ese dia. Cada dia expone
+ * tambien las horas de almuerzo descontadas y alertas cuando las horas extra
+ * superan el limite legal (2 al dia, 12 a la semana).
+ *
  * Primera entrada / ultima salida y horas redondeadas (2026-09-02, a
  * pedido del usuario): ademas del desglose exacto, cada dia expone la
  * primera entrada y la ultima salida (el "bookend" del dia, no cada
  * marcacion intermedia) y una version de esas mismas horas y del total
- * redondeadas al bloque de 30 minutos mas cercano (ver redondearHora()).
+ * redondeadas al bloque de minutos configurado en configuracion_global
+ * (redondeo_minutos, hoy 15; antes 30) mas cercano, con el empate a favor del
+ * colaborador (la entrada baja, la salida sube; ver redondearHora()).
  * El redondeo se aplica a los segmentos ya definitivos (despues de fusion
  * de marcaciones casi seguidas y descuento de almuerzo) y se suma
  * segmento por segmento, para que un turno partido no cuente como
@@ -141,6 +151,20 @@ class ReporteHorasRegistroService
      * explicacion de una salida sin marcar.
      */
     private const CATEGORIAS_DE_AUSENCIA = ['permiso', 'vacaciones', 'incapacidad', 'ausencia', 'descanso_compensatorio'];
+
+    /**
+     * Categoria de novedad que indica que ese dia el colaborador NO tomo el
+     * almuerzo: una novedad APROBADA de esta categoria evita el descuento
+     * automatico de la hora de almuerzo (ver descontarAlmuerzo()).
+     */
+    private const CATEGORIA_ALMUERZO_NO_TOMADO = 'almuerzo_no_tomado';
+
+    /** Bloque de redondeo si no hay configuracion vigente en la fecha (la tabla configuracion_global lo trae por vigencia). */
+    private const REDONDEO_POR_DEFECTO_MINUTOS = 15;
+
+    /** Limite legal de horas extra (Ley 50 de 1990, art. 22): 2 al dia y 12 a la semana. Solo se usa para alertar, no para recortar horas. */
+    private const LIMITE_EXTRAS_DIARIAS = 2.0;
+    private const LIMITE_EXTRAS_SEMANALES = 12.0;
 
     /** Hueco maximo (minutos) entre dos segmentos para considerarlos una marcacion doble accidental y fusionarlos. */
     private const UMBRAL_FUSION_MARCACIONES_MINUTOS = 2;
@@ -178,6 +202,9 @@ class ReporteHorasRegistroService
         // ordinaria/extra de CADA dia debe repartirse contra el acumulado
         // de SU MISMO universo, no contra el del otro.
         $acumuladoSemanalRedondeado = 0.0;
+        // Horas extra de la semana (misma base que se muestra: la redondeada
+        // cuando existe) para alertar al pasar el limite legal semanal.
+        $extrasSemana = 0.0;
         $semanaActual = null;
 
         $cursor = new DateTimeImmutable($inicioSemana);
@@ -189,6 +216,7 @@ class ReporteHorasRegistroService
             if ($claveSemana !== $semanaActual) {
                 $acumuladoSemanal = 0.0;
                 $acumuladoSemanalRedondeado = 0.0;
+                $extrasSemana = 0.0;
                 $semanaActual = $claveSemana;
             }
 
@@ -202,6 +230,11 @@ class ReporteHorasRegistroService
 
             $config = ConfiguracionGlobalModel::vigenteEnFecha($fecha);
             $jornadaSemanal = $config ? (float) $config['jornada_semanal_horas'] : 0.0;
+            // Tope de horas ordinarias por dia (null = sin tope diario) y bloque de redondeo.
+            $jornadaDiaria = ($config && isset($config['jornada_diaria_maxima_horas']) && (float) $config['jornada_diaria_maxima_horas'] > 0)
+                ? (float) $config['jornada_diaria_maxima_horas']
+                : null;
+            $redondeoMinutos = ($config && isset($config['redondeo_minutos'])) ? (int) $config['redondeo_minutos'] : self::REDONDEO_POR_DEFECTO_MINUTOS;
             $inicioNocturno = $config ? $this->normalizar($config['hora_inicio_recargo_nocturno']) : '21:00:00';
             $finNocturno = $config ? $this->normalizar($config['hora_fin_recargo_nocturno']) : '06:00:00';
 
@@ -209,19 +242,28 @@ class ReporteHorasRegistroService
             // separado, no el dia completo (ver docblock de la clase y
             // CalculoRecargosService::segmentosDelDia() para el caso real
             // que motivo el cambio 2026-09-05).
-            if (in_array($estado, self::ESTADOS_CON_HORAS, true) && $config && !empty($config['almuerzo_activo'])) {
+            //
+            // Una novedad APROBADA "Almuerzo no tomado" de ese dia evita el
+            // descuento (el sistema no puede saber por si solo que el
+            // colaborador trabajo de corrido): las horas de la ventana de
+            // almuerzo cuentan como trabajadas.
+            $almuerzoExento = $this->tieneAlmuerzoNoTomado($novedadesDelDia);
+            $almuerzoDescontado = 0.0;
+            if (in_array($estado, self::ESTADOS_CON_HORAS, true) && $config && !empty($config['almuerzo_activo']) && !$almuerzoExento) {
+                $horasAntes = $this->sumarDuraciones($segmentos);
                 $segmentosConAlmuerzo = [];
                 foreach ($segmentos as $segmento) {
                     $segmentosConAlmuerzo = array_merge($segmentosConAlmuerzo, $this->descontarAlmuerzo($segmento, $config));
                 }
                 $segmentos = $segmentosConAlmuerzo;
+                $almuerzoDescontado = round($horasAntes - $this->sumarDuraciones($segmentos), 4);
             }
 
             $esDomingoOFestivo = ($cursor->format('w') === '0') || isset($festivos[$fecha]);
 
-            [$horasTotales, $desglosePorTipo] = in_array($estado, self::ESTADOS_CON_HORAS, true)
-                ? $this->clasificarSegmentos($segmentos, $fecha, $esDomingoOFestivo, $inicioNocturno, $finNocturno, $jornadaSemanal, $acumuladoSemanal)
-                : [0.0, []];
+            [$horasTotales, $desglosePorTipo, $horasExtra] = in_array($estado, self::ESTADOS_CON_HORAS, true)
+                ? $this->clasificarSegmentos($segmentos, $fecha, $esDomingoOFestivo, $inicioNocturno, $finNocturno, $jornadaSemanal, $jornadaDiaria, $acumuladoSemanal)
+                : [0.0, [], 0.0];
 
             $salidaEstimada = ($estado === 'cerrado_automatico' && !empty($segmentos)) ? end($segmentos)['hora_fin'] : null;
 
@@ -245,8 +287,8 @@ class ReporteHorasRegistroService
             // Horas redondeadas (a pedido del usuario, 2026-09-02, y su
             // desglose por tipo de recargo tambien redondeado, agregado el
             // mismo dia a pedido explicito de "los recargos tambien deben
-            // quedar redondeados"): mismo criterio de redondeo (30 min, al
-            // mas cercano) aplicado a la hora de inicio/fin de cada
+            // quedar redondeados"): mismo criterio de redondeo (bloque
+            // configurado, al mas cercano) aplicado a la hora de inicio/fin de cada
             // segmento ya definitivo (los mismos que se usaron para el
             // calculo exacto, es decir despues de fusionar marcaciones casi
             // seguidas y descontar almuerzo) — asi un turno partido no
@@ -260,23 +302,36 @@ class ReporteHorasRegistroService
             // exacto ni alimenta el motor legal.
             $segmentosRedondeados = [];
             foreach ($segmentos as $segmento) {
-                $inicioRedondeado = $this->redondearHora($this->normalizar($segmento['hora_inicio']));
-                $finRedondeado = $this->redondearHora($this->normalizar($segmento['hora_fin']));
+                $inicioRedondeado = $this->redondearHora($this->normalizar($segmento['hora_inicio']), $redondeoMinutos, true);
+                $finRedondeado = $this->redondearHora($this->normalizar($segmento['hora_fin']), $redondeoMinutos, false);
                 if ($finRedondeado > $inicioRedondeado) {
                     // Un segmento muy corto puede redondear a duracion cero
                     // (o, en un caso extremo, invertirse) si ambos extremos
-                    // caen en el mismo bloque de 30 min o en bloques
+                    // caen en el mismo bloque de redondeo o en bloques
                     // adyacentes mal alineados; se omite en vez de sumar
                     // horas negativas o inventadas.
                     $segmentosRedondeados[] = ['hora_inicio' => $inicioRedondeado, 'hora_fin' => $finRedondeado];
                 }
             }
 
-            [$horasTotalesRedondeadas, $desglosePorTipoRedondeado] = in_array($estado, self::ESTADOS_CON_HORAS, true)
-                ? $this->clasificarSegmentos($segmentosRedondeados, $fecha, $esDomingoOFestivo, $inicioNocturno, $finNocturno, $jornadaSemanal, $acumuladoSemanalRedondeado)
-                : [null, []];
+            [$horasTotalesRedondeadas, $desglosePorTipoRedondeado, $horasExtraRedondeadas] = in_array($estado, self::ESTADOS_CON_HORAS, true)
+                ? $this->clasificarSegmentos($segmentosRedondeados, $fecha, $esDomingoOFestivo, $inicioNocturno, $finNocturno, $jornadaSemanal, $jornadaDiaria, $acumuladoSemanalRedondeado)
+                : [null, [], null];
             if ($horasTotalesRedondeadas !== null) {
                 $horasTotalesRedondeadas = round($horasTotalesRedondeadas, 2);
+            }
+
+            // Alertas por el limite legal de horas extra (2 al dia, 12 a la
+            // semana). Solo informan: las horas se muestran y se pagan igual.
+            $extrasDelDia = round($horasExtraRedondeadas ?? $horasExtra, 2);
+            $extrasSemanaAntes = $extrasSemana;
+            $extrasSemana += $extrasDelDia;
+            $alertas = [];
+            if ($extrasDelDia > self::LIMITE_EXTRAS_DIARIAS + 0.0001) {
+                $alertas[] = sprintf('Horas extra del dia: %s h, por encima del limite legal de %s h diarias.', $this->formatoHoras($extrasDelDia), $this->formatoHoras(self::LIMITE_EXTRAS_DIARIAS));
+            }
+            if ($extrasSemana > self::LIMITE_EXTRAS_SEMANALES + 0.0001 && $extrasSemanaAntes <= self::LIMITE_EXTRAS_SEMANALES + 0.0001) {
+                $alertas[] = sprintf('Con este dia las horas extra de la semana suman %s h, por encima del limite legal de %s h semanales.', $this->formatoHoras($extrasSemana), $this->formatoHoras(self::LIMITE_EXTRAS_SEMANALES));
             }
 
             $resultado[] = [
@@ -297,10 +352,18 @@ class ReporteHorasRegistroService
                 'salida_estimada' => $salidaEstimada,
                 'primera_entrada' => $primeraEntrada,
                 'ultima_salida' => $ultimaSalida,
-                'primera_entrada_redondeada' => $primeraEntrada ? $this->redondearHora($this->normalizar($primeraEntrada)) : null,
-                'ultima_salida_redondeada' => $ultimaSalida ? $this->redondearHora($this->normalizar($ultimaSalida)) : null,
+                'primera_entrada_redondeada' => $primeraEntrada ? $this->redondearHora($this->normalizar($primeraEntrada), $redondeoMinutos, true) : null,
+                'ultima_salida_redondeada' => $ultimaSalida ? $this->redondearHora($this->normalizar($ultimaSalida), $redondeoMinutos, false) : null,
                 'horas_totales' => round($horasTotales, 2),
                 'horas_totales_redondeadas' => $horasTotalesRedondeadas,
+                'horas_extra' => round($horasExtra, 2),
+                'horas_extra_redondeadas' => $horasExtraRedondeadas !== null ? round($horasExtraRedondeadas, 2) : null,
+                'redondeo_minutos' => $redondeoMinutos,
+                // Horas de almuerzo descontadas ese dia y si el descuento se
+                // evito por una novedad "Almuerzo no tomado" aprobada.
+                'almuerzo_descontado_horas' => $almuerzoDescontado,
+                'almuerzo_no_tomado' => $almuerzoExento,
+                'alertas' => $alertas,
                 'desglose' => array_values($desglosePorTipo),
                 'desglose_redondeado' => array_values($desglosePorTipoRedondeado),
             ];
@@ -495,20 +558,56 @@ class ReporteHorasRegistroService
     }
 
     /**
-     * Redondea una hora "HH:MM:SS" al bloque de minutos mas cercano (30 por
-     * defecto, a pedido del usuario). Empate exacto (ej. minuto 15 con
-     * bloques de 30) redondea hacia arriba. Solo para las columnas/total
+     * Redondea una hora "HH:MM:SS" al multiplo de $minutos mas cercano
+     * (0 = sin redondeo). En un empate exacto (ej. 7 min 30 s con bloques de
+     * 15) el redondeo favorece al colaborador: una ENTRADA baja (cuenta mas
+     * tiempo trabajado) y una SALIDA sube. Asi el redondeo es simetrico y no
+     * descuenta tiempo de forma sistematica. Solo para las columnas/total
      * "redondeado" del reporte de horas segun registro — nunca se usa para
-     * el calculo legal ni se persiste en ningun lado.
+     * el calculo legal por horario ni se persiste en ningun lado.
      */
-    private function redondearHora(string $hora, int $minutos = 30): string
+    private function redondearHora(string $hora, int $minutos, bool $esEntrada): string
     {
         [$h, $m, $s] = array_map('intval', explode(':', $hora));
         $segundos = $h * 3600 + $m * 60 + $s;
-        $bloque = $minutos * 60;
-        $redondeado = (int) floor(($segundos + $bloque / 2) / $bloque) * $bloque;
-        $redondeado = max(0, min($redondeado, 23 * 3600 + 59 * 60 + 59));
-        return sprintf('%02d:%02d:%02d', intdiv($redondeado, 3600), intdiv($redondeado % 3600, 60), $redondeado % 60);
+
+        if ($minutos > 0) {
+            $bloque = $minutos * 60;
+            $mitad = intdiv($bloque, 2);
+            $redondeado = $esEntrada
+                ? (int) ceil(($segundos - $mitad) / $bloque) * $bloque
+                : intdiv($segundos + $mitad, $bloque) * $bloque;
+            $segundos = $redondeado;
+        }
+
+        $segundos = max(0, min($segundos, 23 * 3600 + 59 * 60 + 59));
+        return sprintf('%02d:%02d:%02d', intdiv($segundos, 3600), intdiv($segundos % 3600, 60), $segundos % 60);
+    }
+
+    /** true si hay una novedad APROBADA de la categoria "almuerzo no tomado" ese dia (las pendientes/rechazadas no cuentan). */
+    private function tieneAlmuerzoNoTomado(array $novedadesDelDia): bool
+    {
+        foreach ($novedadesDelDia as $n) {
+            if (($n['categoria'] ?? null) === self::CATEGORIA_ALMUERZO_NO_TOMADO && ($n['estado'] ?? null) === 'aprobado') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<int, array{hora_inicio:string, hora_fin:string}> $segmentos */
+    private function sumarDuraciones(array $segmentos): float
+    {
+        $total = 0.0;
+        foreach ($segmentos as $segmento) {
+            $total += $this->horasEntre($this->normalizar($segmento['hora_inicio']), $this->normalizar($segmento['hora_fin']));
+        }
+        return $total;
+    }
+
+    private function formatoHoras(float $horas): string
+    {
+        return rtrim(rtrim(number_format($horas, 2, '.', ''), '0'), '.');
     }
 
     /**
@@ -589,12 +688,23 @@ class ReporteHorasRegistroService
      * clasificacion, cada uno con su propio acumulado semanal para no
      * mezclar los dos universos.
      *
+     * Tope diario (jornada flexible, hoy 9 h): ademas del acumulado semanal,
+     * cada dia admite como maximo $jornadaDiaria horas ORDINARIAS; lo que lo
+     * supere es hora extra aunque la semana no haya llegado a la jornada
+     * semanal. Con tope diario, solo las horas ordinarias consumen la
+     * capacidad semanal (una hora que ya es extra por pasarse del dia no
+     * debe adelantar las extras de los dias siguientes). Sin tope diario
+     * (null, vigencias anteriores) se conserva el comportamiento anterior:
+     * toda hora trabajada suma al acumulado semanal.
+     *
      * @param array<int, array{hora_inicio:string, hora_fin:string}> $segmentos
-     * @return array{0: float, 1: array<string, array{codigo:string,nombre:string,horas:float}>}
+     * @return array{0: float, 1: array<string, array{codigo:string,nombre:string,horas:float}>, 2: float} horas totales, desglose por tipo y horas extra del dia
      */
-    private function clasificarSegmentos(array $segmentos, string $fecha, bool $esDomingoOFestivo, string $inicioNocturno, string $finNocturno, float $jornadaSemanal, float &$acumuladoSemanal): array
+    private function clasificarSegmentos(array $segmentos, string $fecha, bool $esDomingoOFestivo, string $inicioNocturno, string $finNocturno, float $jornadaSemanal, ?float $jornadaDiaria, float &$acumuladoSemanal): array
     {
         $horasTotales = 0.0;
+        $horasExtra = 0.0;
+        $acumuladoDia = 0.0;
         $desglosePorTipo = [];
 
         foreach ($segmentos as $segmento) {
@@ -606,8 +716,16 @@ class ReporteHorasRegistroService
             );
 
             foreach ($subsegmentos as $sub) {
-                $partes = $this->repartirPorAcumuladoSemanal($sub['horas'], $acumuladoSemanal, $jornadaSemanal);
-                $acumuladoSemanal += $sub['horas'];
+                $partes = $this->repartirPorAcumulados($sub['horas'], $acumuladoSemanal, $jornadaSemanal, $acumuladoDia, $jornadaDiaria);
+
+                $horasOrdinarias = 0.0;
+                foreach ($partes as $parte) {
+                    if (!$parte['es_extra']) {
+                        $horasOrdinarias += $parte['horas'];
+                    }
+                }
+                $acumuladoSemanal += $jornadaDiaria === null ? $sub['horas'] : $horasOrdinarias;
+                $acumuladoDia += $horasOrdinarias;
 
                 foreach ($partes as $parte) {
                     if ($parte['horas'] <= 0.0001) {
@@ -615,6 +733,9 @@ class ReporteHorasRegistroService
                     }
 
                     $horasTotales += $parte['horas'];
+                    if ($parte['es_extra']) {
+                        $horasExtra += $parte['horas'];
+                    }
 
                     $tipoRecargo = TipoRecargoModel::buscarPorFlags($fecha, $parte['es_extra'], $sub['es_nocturno'], $esDomingoOFestivo);
                     $clave = $tipoRecargo['codigo'] ?? 'sin_clasificar';
@@ -630,7 +751,7 @@ class ReporteHorasRegistroService
             }
         }
 
-        return [$horasTotales, $desglosePorTipo];
+        return [$horasTotales, $desglosePorTipo, $horasExtra];
     }
 
     /** Divide [horaInicio, horaFin) en sub-segmentos diurno/nocturno. */
@@ -666,10 +787,19 @@ class ReporteHorasRegistroService
         return $t >= $inicioNocturno && $t < $finNocturno;
     }
 
-    /** @return array<int, array{horas:float, es_extra:bool}> */
-    private function repartirPorAcumuladoSemanal(float $horas, float $acumulado, float $jornadaSemanal): array
+    /**
+     * Reparte las horas entre ordinarias y extra segun la capacidad que le
+     * queda a la semana y, si hay tope diario, al dia: la capacidad es la
+     * menor de las dos.
+     *
+     * @return array<int, array{horas:float, es_extra:bool}>
+     */
+    private function repartirPorAcumulados(float $horas, float $acumuladoSemanal, float $jornadaSemanal, float $acumuladoDia, ?float $jornadaDiaria): array
     {
-        $capacidadRestante = max(0.0, $jornadaSemanal - $acumulado);
+        $capacidadRestante = max(0.0, $jornadaSemanal - $acumuladoSemanal);
+        if ($jornadaDiaria !== null) {
+            $capacidadRestante = min($capacidadRestante, max(0.0, $jornadaDiaria - $acumuladoDia));
+        }
 
         if ($capacidadRestante >= $horas) {
             return [['horas' => $horas, 'es_extra' => false]];
